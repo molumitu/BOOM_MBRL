@@ -1,0 +1,6 @@
+torchrl==0.4.0
+hydra-core==1.3.2
+hydra-submitit-launcher==1.2.0
+tensordict==0.4.0
+termcolor==2.4.0
+wandb
