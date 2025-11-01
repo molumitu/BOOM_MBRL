@@ -1,9 +1,8 @@
 # [NeurIPS2025] Bootstrap Off-policy with World Model (BOOM)
 
 ## Notes
-Our paper reports the results after 2 million (2M) iterations.  
-- For DMC: Action repeat is 2, corresponding to 4 million (4M) environmental steps.  
-- For Humanoid-Bench: Action repeat is 1, corresponding to 2 million (2M) environmental steps.
+Our paper reports the results after 2 million (2M) iterations. The default action repeat is 2, corresponding to 4 million (4M) environmental steps.  
+
 
 ## Quick Start Instructions
 
