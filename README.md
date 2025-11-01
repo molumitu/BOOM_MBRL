@@ -21,7 +21,7 @@ python train.py # Default is dog-run, with an expected score of ~800.
 If you find our work useful, please cite our paper:
 ```text
 @inproceedings{boom2025neurips,
-  title={Bootstrap Off-policy with World Model (BOOM)},
+  title={Bootstrap Off-policy with World Model},
   author={Zhan, Guojian and Wang, Likun and Zhang, Xiangteng and Gao, Jiaxin and Tomizuka, Masayoshi and Li, Shengbo Eben},
   booktitle={Advances in Neural Information Processing Systems (NeurIPS)},
   year={2025}
