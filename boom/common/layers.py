@@ -80,10 +80,11 @@ class SimNorm(nn.Module):
         self.dim = cfg.simnorm_dim
 
     def forward(self, x):
-        shp = x.shape
-        x = x.view(*shp[:-1], -1, self.dim)
-        x = F.softmax(x, dim=-1)
-        return x.view(*shp)
+        return x
+        # shp = x.shape
+        # x = x.view(*shp[:-1], -1, self.dim)
+        # x = F.softmax(x, dim=-1)
+        # return x.view(*shp)
 
     def __repr__(self):
         return f"SimNorm(dim={self.dim})"
