@@ -80,15 +80,23 @@ class SimNorm(nn.Module):
         self.dim = cfg.simnorm_dim
 
     def forward(self, x):
-        return x
-        # shp = x.shape
-        # x = x.view(*shp[:-1], -1, self.dim)
-        # x = F.softmax(x, dim=-1)
-        # return x.view(*shp)
+        shp = x.shape
+        x = x.view(*shp[:-1], -1, self.dim)
+        x = F.softmax(x, dim=-1)
+        return x.view(*shp)
 
     def __repr__(self):
         return f"SimNorm(dim={self.dim})"
+    
+class Tanh(nn.Module):
+    """
+    Tanh activation function.
+    """
+    def __init__(self, cfg):
+        super().__init__()
 
+    def forward(self, x):
+        return torch.tanh(x)
 
 class NormedLinear(nn.Linear):
     """
@@ -167,6 +175,7 @@ def enc(cfg, out={}):
         cfg.obs_shape['state'][0] + cfg.task_dim,
         max(cfg.num_enc_layers - 1, 1) * [cfg.enc_dim],
         cfg.latent_dim,
-        act=SimNorm(cfg),
+        # act=SimNorm(cfg),
+        act=Tanh(cfg),
     )
     return nn.ModuleDict(out)
