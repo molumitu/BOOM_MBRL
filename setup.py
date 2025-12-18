@@ -18,6 +18,7 @@ core_requirements = [
     "torch==2.3.1",
     "opencv-python==4.10.0.84",
     "natsort==8.4.0",
+    "numpy==1.26.4",
 ]
 
 setup(
