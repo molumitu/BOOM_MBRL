@@ -24,8 +24,7 @@ class WorldModel(nn.Module):
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
             2 * [cfg.mlp_dim],
             cfg.latent_dim,
-            act=layers.Tanh(cfg),
-            # act=layers.SimNorm(cfg),
+            act=layers.SimNorm(cfg),
         )
         self._reward = layers.mlp(
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
