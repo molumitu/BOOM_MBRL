@@ -4,7 +4,7 @@ defaults:
 # environment
 task: dog-run
 obs: state
-boom: v1
+boom: v2
 
 # evaluation
 checkpoint: ???

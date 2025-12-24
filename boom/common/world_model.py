@@ -24,8 +24,7 @@ class WorldModel(nn.Module):
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
             2 * [cfg.mlp_dim],
             cfg.latent_dim,
-            act=layers.Tanh(cfg),
-            # act=layers.SimNorm(cfg),
+            act=layers.SimNorm(cfg),
         )
         self._reward = layers.mlp(
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
@@ -47,9 +46,37 @@ class WorldModel(nn.Module):
                 for _ in range(cfg.num_q)
             ]
         )
+        ### add V networks
+        self._Vs = layers.Ensemble(
+            [
+                layers.mlp(
+                    cfg.latent_dim + cfg.task_dim,
+                    2 * [cfg.mlp_dim],
+                    max(cfg.num_bins, 1),
+                    dropout=cfg.dropout,
+                )
+                for _ in range(cfg.num_v)
+            ]
+        )
+        ### add Qp networks
+        self._Qps = layers.Ensemble(
+            [
+                layers.mlp(
+                    cfg.latent_dim + cfg.action_dim + cfg.task_dim,
+                    2 * [cfg.mlp_dim],
+                    max(cfg.num_bins, 1),
+                    dropout=cfg.dropout,
+                )
+                for _ in range(cfg.num_q)
+            ]
+        )
         self.apply(init.weight_init)
         init.zero_([self._reward[-1].weight, self._Qs.params[-2]])
+        init.zero_([self._Vs.params[-2]])
+        init.zero_([self._Qps.params[-2]])
         self._target_Qs = deepcopy(self._Qs).requires_grad_(False)
+        self._target_Vs = deepcopy(self._Vs).requires_grad_(False)
+        self._target_Qps = deepcopy(self._Qps).requires_grad_(False)
         self.log_std_min = torch.tensor(cfg.log_std_min)
         self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
 
@@ -59,7 +86,11 @@ class WorldModel(nn.Module):
         self._reward = torch.compile(self._reward)
         self._pi = torch.compile(self._pi)
         self._Qs = torch.compile(self._Qs)
+        self._Vs = torch.compile(self._Vs)
+        self._Qps = torch.compile(self._Qps)
         self._target_Qs = torch.compile(self._target_Qs)
+        self._target_Vs = torch.compile(self._target_Vs)
+        self._target_Qps = torch.compile(self._target_Qps)
         self._task_emb = torch.compile(self._task_emb) if cfg.multitask else None
 
     @property
@@ -97,6 +128,18 @@ class WorldModel(nn.Module):
             for p in self._task_emb.parameters():
                 p.requires_grad_(mode)
 
+    def track_qp_grad(self, mode=True):
+        """
+        Enables/disables gradient tracking of Q-networks.
+        Avoids unnecessary computation during policy optimization.
+        This method also enables/disables gradients for task embeddings.
+        """
+        for p in self._Qps.parameters():
+            p.requires_grad_(mode)
+        if self.cfg.multitask:
+            for p in self._task_emb.parameters():
+                p.requires_grad_(mode)
+
     def track_v_grad(self, mode=True):
         """
         Enables/disables gradient tracking of V-networks.
@@ -115,6 +158,22 @@ class WorldModel(nn.Module):
         """
         with torch.no_grad():
             for p, p_target in zip(self._Qs.parameters(), self._target_Qs.parameters()):
+                p_target.data.lerp_(p.data, self.cfg.tau)
+
+    def soft_update_target_Qp(self):
+        """
+        Soft-update target Qp-networks using Polyak averaging.
+        """
+        with torch.no_grad():
+            for p, p_target in zip(self._Qps.parameters(), self._target_Qps.parameters()):
+                p_target.data.lerp_(p.data, self.cfg.tau)
+
+    def soft_update_target_V(self):
+        """
+        Soft-update target V-networks using Polyak averaging.
+        """
+        with torch.no_grad():
+            for p, p_target in zip(self._Vs.parameters(), self._target_Vs.parameters()):
                 p_target.data.lerp_(p.data, self.cfg.tau)
 
     def task_emb(self, x, task):
@@ -240,3 +299,65 @@ class WorldModel(nn.Module):
             qs_thot = [math.two_hot_inv(q, self.cfg) for q in out]
             qs_thot = torch.stack(qs_thot, dim=0)
             return torch.max(qs_thot, dim=0)[0]
+        
+    def Qp(self, z, a, task, return_type="min", target=False):
+        """
+        Predict state-action value.
+        `return_type` can be one of [`min`, `avg`, `all`]:
+                - `min`: return the minimum of two randomly subsampled Qp-values.
+                - `avg`: return the average of two randomly subsampled Qp-values.
+                - `max`: return the maximum of two randomly subsampled Qp-values.
+                - `all`: return all Qp-values.
+        `target` specifies whether to use the target Qp-networks or not.
+        """
+        assert return_type in {"min", "avg", "all", "max"}
+
+        if self.cfg.multitask:
+            z = self.task_emb(z, task)
+
+        z = torch.cat([z, a], dim=-1)
+        out = (self._target_Qps if target else self._Qps)(z)
+
+        if return_type == "all":
+            return out
+
+        Qp1, Qp2 = out[np.random.choice(self.cfg.num_v, 2, replace=False)]
+        Qp1, Qp2 = math.two_hot_inv(Qp1, self.cfg), math.two_hot_inv(Qp2, self.cfg)
+
+        if return_type == "min":
+            return torch.min(Qp1, Qp2)
+        elif return_type == "avg":
+            return (Qp1 + Qp2) / 2
+        elif return_type == "max":
+            qps_thot = [math.two_hot_inv(qp, self.cfg) for qp in out]
+            qps_thot = torch.stack(qps_thot, dim=0)
+            return torch.max(qps_thot, dim=0)[0]
+        
+
+    def V(self, z, task, return_type="min", target=False):
+        """
+        Predict state value.
+        `return_type` can be one of [`min`, `avg`, `all`]:
+                - `min`: return the minimum of two randomly subsampled V-values.
+                - `avg`: return the average of two randomly subsampled V-values.
+                - `max`: return the maximum of two randomly subsampled V-values.
+                - `all`: return all V-values.
+        `target` specifies whether to use the target V-networks or not.
+        """
+        assert return_type in {"min", "avg", "all", "max"}
+        if self.cfg.multitask:
+            z = self.task_emb(z, task)
+        out = (self._target_Vs if target else self._Vs)(z)
+        if return_type == "all":
+            return out
+        V1, V2 = out[np.random.choice(self.cfg.num_v, 2, replace=False)]
+        V1, V2 = math.two_hot_inv(V1, self.cfg), math.two_hot_inv(V2, self.cfg)
+        
+        if return_type == "min":
+            return torch.min(V1, V2)
+        elif return_type == "avg":
+            return (V1 + V2) / 2
+        elif return_type == "max":
+            vs_thot = [math.two_hot_inv(v, self.cfg) for v in out]
+            vs_thot = torch.stack(vs_thot, dim=0)
+            return torch.max(vs_thot, dim=0)[0]

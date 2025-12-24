@@ -27,6 +27,8 @@ from boom.common.seed import set_seed
 from boom.common.buffer import Buffer
 from boom.envs import make_env
 from boom.boom_alg import BOOM
+from boom.boom_v2_alg import BOOMV2
+from boom.boom_v3_alg import BOOMV3
 from boom.trainer.online_trainer import OnlineTrainer
 from boom.common.logger import Logger
 
@@ -43,11 +45,20 @@ def train(cfg: dict):
     set_seed(cfg.seed)
     print(colored("Work dir:", "yellow", attrs=["bold"]), cfg.work_dir)
 
+
+    if cfg.boom == 'v1':
+        print(colored("Using BOOM v1", "green", attrs=["bold"]))
+    elif cfg.boom == 'v2':
+        print(colored("Using BOOM v2", "green", attrs=["bold"]))
+    elif cfg.boom == 'v3':
+        print(colored("Using BOOM v3", "green", attrs=["bold"]))
+    else:
+        raise ValueError(f"Unknown BOOM version: {cfg.boom}")
     trainer_cls = OnlineTrainer
     trainer = trainer_cls(
         cfg=cfg,
         env=make_env(cfg),
-        agent=BOOM(cfg),
+        agent=BOOMV3(cfg) if cfg.boom == 'v3' else BOOMV2(cfg) if cfg.boom == 'v2' else BOOM(cfg),
         buffer=Buffer(cfg),
         logger=Logger(cfg),
     )

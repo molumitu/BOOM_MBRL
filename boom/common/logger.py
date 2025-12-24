@@ -165,6 +165,10 @@ class Logger:
         logfile = open(self.output_file, 'w')
         sys.stdout = Tee(sys.stdout, logfile)
 
+        ### save cfg
+        with open(self.wandb_savefolder + '/config.txt', 'w') as f:
+            f.write(OmegaConf.to_yaml(cfg))
+
     @property
     def video(self):
         return self._video
