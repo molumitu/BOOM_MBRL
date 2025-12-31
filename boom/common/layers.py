@@ -81,7 +81,7 @@ class SimNorm(nn.Module):
         self.action_dim = cfg.action_dim
 
     def forward(self, x):
-        if self.action_dim >= 20:
+        if self.action_dim >= 24:
             return x
         else:
             shp = x.shape
