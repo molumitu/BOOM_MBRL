@@ -13,7 +13,7 @@ pip install -r requirement.txt
 pip install -e .  # Ensure setup.py exists in the current directory
 cd boom
 python train.py # Default is dog-run, with an expected score of ~800.
-# For Humanoid-bench, you can set task=humanoid_h1-run as an example.
+# For Humanoid-bench, you can set task=humanoid_h1hand-run-v0 as an example.
 ```
 
 
