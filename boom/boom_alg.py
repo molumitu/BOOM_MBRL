@@ -267,7 +267,7 @@ class BOOM:
 		fkl_loss = - (forward_kl.sum(dim=-1) * rho).mean()
 		
 		############### Combine losses and update ###############
-		if self.cfg.action_dim >= 24:
+		if self.cfg.action_dim >= 24 and self.cfg.action_dim <= 48:
 			self.lamda = 1/1000
 		else:
 			self.lamda = 1/100
