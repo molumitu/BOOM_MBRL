@@ -15,7 +15,7 @@ eval_value: false
 eval_freq: 50000
 
 # training
-steps: 2_000_000 # env step = steps * action_repeat
+steps: 2_001_000 # env step = steps * action_repeat
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1
