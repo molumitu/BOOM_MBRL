@@ -9,7 +9,6 @@ Our paper reports the results after 2 million (2M) iterations. The default actio
 ```bash
 conda create -n boom python=3.10
 conda activate boom
-pip install -r requirement.txt
 pip install -e .  # Ensure setup.py exists in the current directory
 cd boom
 python train.py # Default is dog-run, with an expected score of ~800.

@@ -5,6 +5,11 @@ from setuptools import find_packages, setup
 long_description = (Path(__file__).parent / "README.md").read_text()
 
 core_requirements = [
+    "torchrl==0.4.0",
+    "hydra-core==1.3.2",
+    "hydra-submitit-launcher==1.2.0",
+    "tensordict==0.4.0",
+    "termcolor==2.4.0",
     "gymnasium==0.29.1",
     "rich==13.7.1",
     "tqdm==4.66.4",
@@ -19,6 +24,7 @@ core_requirements = [
     "opencv-python==4.10.0.84",
     "natsort==8.4.0",
     "numpy==1.26.4",
+    "wandb==0.23.1",
 ]
 
 setup(
