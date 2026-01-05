@@ -267,7 +267,11 @@ class BOOM:
 		fkl_loss = - (forward_kl.sum(dim=-1) * rho).mean()
 		
 		############### Combine losses and update ###############
-		pi_loss = q_loss + (self.cfg.action_dim / 1000) * fkl_loss
+		if self.cfg.action_dim >= 24:
+			self.lamda = 1/1000
+		else:
+			self.lamda = 1/100
+		pi_loss = q_loss + (self.cfg.action_dim * self.lamda) * fkl_loss
 		pi_loss.backward()
 		torch.nn.utils.clip_grad_norm_(
 			self.model._pi.parameters(), self.cfg.grad_clip_norm

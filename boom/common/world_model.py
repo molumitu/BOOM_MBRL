@@ -28,7 +28,7 @@ class WorldModel(nn.Module):
         )
         self._reward = layers.mlp(
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
-            2 * [cfg.mlp_dim],
+            3 * [cfg.mlp_dim],
             max(cfg.num_bins, 1),
         )
         self._pi = layers.mlp(
@@ -47,7 +47,9 @@ class WorldModel(nn.Module):
             ]
         )
         self.apply(init.weight_init)
-        init.zero_([self._reward[-1].weight, self._Qs.params[-2]])
+        nn.init.orthogonal_(self._reward[-1].weight)
+        nn.init.zeros_(self._Qs.params[-2])
+        
         self._target_Qs = deepcopy(self._Qs).requires_grad_(False)
         self.log_std_min = torch.tensor(cfg.log_std_min)
         self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
