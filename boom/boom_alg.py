@@ -7,6 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from boom.common import math
 from boom.common.scale import RunningScale
 from boom.common.world_model import WorldModel
+from boom.bpo_core import _bpograd
 
 class BOOM:
 	"""
@@ -272,13 +273,30 @@ class BOOM:
 		else:
 			self.lamda = 1/100
 		pi_loss = q_loss + (self.cfg.action_dim * self.lamda) * fkl_loss
-		pi_loss.backward()
-		torch.nn.utils.clip_grad_norm_(
-			self.model._pi.parameters(), self.cfg.grad_clip_norm
-		)
+
+		params = list(self.model._pi.parameters())
+		if fkl_loss.requires_grad:
+			grads1 = torch.autograd.grad(q_loss, params, retain_graph=True, allow_unused=True)
+			grads2 = torch.autograd.grad(fkl_loss, params, retain_graph=True, allow_unused=True)
+			g1_vec = torch.cat([g.contiguous().view(-1) if g is not None else torch.zeros_like(p).view(-1) 
+								for g, p in zip(grads1, params)])
+			g2_vec = torch.cat([g.contiguous().view(-1) if g is not None else torch.zeros_like(p).view(-1) 
+								for g, p in zip(grads2, params)])
+
+			g_com_vec, weight_1, weight_2 = _bpograd(g1_vec, self.lamda * g2_vec)
+			self.pi_optim.zero_grad(set_to_none=True)
+			pointer = 0
+			for p in params:
+				num_param = p.numel()
+				p.grad = g_com_vec[pointer:pointer + num_param].view_as(p).clone()
+				pointer += num_param
+		else:
+			self.pi_optim.zero_grad(set_to_none=True)
+			q_loss.backward()
+
+		torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip_norm)
 		self.pi_optim.step()
 		self.model.track_q_grad(True)
-
 		return pi_loss.item(), q_loss.item(), fkl_loss.item()
 
 	@torch.no_grad()
