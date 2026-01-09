@@ -269,10 +269,10 @@ class BOOM:
 		
 		############### Combine losses and update ###############
 		if self.cfg.action_dim >= 24 and self.cfg.action_dim <= 48:
-			self.lamda = 1/1000
+			self.lamda = self.cfg.action_dim * 1/1000
 		else:
-			self.lamda = 1/100
-		pi_loss = q_loss + (self.cfg.action_dim * self.lamda) * fkl_loss
+			self.lamda = self.cfg.action_dim * 1/100
+		pi_loss = q_loss + self.lamda * fkl_loss
 
 		params = list(self.model._pi.parameters())
 		if fkl_loss.requires_grad:
