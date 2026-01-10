@@ -67,7 +67,7 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: boom
+wandb_project: boom_h
 
 wandb_entity: zgj21-tsinghua-university
 

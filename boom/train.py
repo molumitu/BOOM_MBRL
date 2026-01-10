@@ -1,5 +1,6 @@
 import os
 import sys
+from dm_control import suite
 
 if sys.platform != "darwin":
     os.environ["MUJOCO_GL"] = "osmesa"
@@ -11,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["WANDB_MODE"] = "offline"
+# os.environ["WANDB_MODE"] = "offline"
 
 import torch
 torch.set_num_threads(1)
