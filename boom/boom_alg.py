@@ -276,8 +276,8 @@ class BOOM:
 
 		params = list(self.model._pi.parameters())
 		if fkl_loss.requires_grad:
-			grads1 = torch.autograd.grad(q_loss, params, retain_graph=True, allow_unused=True)
-			grads2 = torch.autograd.grad(fkl_loss, params, retain_graph=True, allow_unused=True)
+			grads1 = torch.autograd.grad(2 * q_loss, params, retain_graph=True, allow_unused=True)
+			grads2 = torch.autograd.grad(2 * fkl_loss, params, retain_graph=True, allow_unused=True)
 			g1_vec = torch.cat([g.contiguous().view(-1) if g is not None else torch.zeros_like(p).view(-1) 
 								for g, p in zip(grads1, params)])
 			g2_vec = torch.cat([g.contiguous().view(-1) if g is not None else torch.zeros_like(p).view(-1) 
@@ -292,7 +292,7 @@ class BOOM:
 				pointer += num_param
 		else:
 			self.pi_optim.zero_grad(set_to_none=True)
-			q_loss.backward()
+			pi_loss.backward()
 
 		torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip_norm)
 		self.pi_optim.step()

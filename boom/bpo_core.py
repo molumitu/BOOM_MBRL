@@ -9,7 +9,7 @@ from torch.optim.optimizer import Optimizer, required
 from torch.utils.data import TensorDataset, DataLoader
 
 
-def _bpograd(g1, g2, g0_coeff=0.5, bpo_coeff=0.1):
+def _bpograd(g1, g2, g0_coeff=0.5, bpo_coeff=0.001):
     """
     Optimize gradients based on given tasks and BPO coefficient.
 
