@@ -4,3 +4,4 @@ boom/logs
 boom/outputs
 */__pycache__/*
 *.pyc
+/.vscode

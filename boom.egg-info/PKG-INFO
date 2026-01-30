@@ -18,6 +18,13 @@ Requires-Dist: brax==0.9.4
 Requires-Dist: torch==2.3.1
 Requires-Dist: opencv-python==4.10.0.84
 Requires-Dist: natsort==8.4.0
+Requires-Dist: numpy==1.26.4
+Requires-Dist: torchrl==0.4.0
+Requires-Dist: hydra-core==1.3.2
+Requires-Dist: hydra-submitit-launcher==1.2.0
+Requires-Dist: tensordict==0.4.0
+Requires-Dist: termcolor==2.4.0
+Requires-Dist: wandb
 Dynamic: author
 Dynamic: description
 Dynamic: description-content-type
@@ -36,11 +43,11 @@ Our paper reports the results after 2 million (2M) iterations. The default actio
 ```bash
 conda create -n boom python=3.10
 conda activate boom
-pip install -r requirement.txt
+# pip install -r requirement.txt
 pip install -e .  # Ensure setup.py exists in the current directory
 cd boom
 python train.py # Default is dog-run, with an expected score of ~800.
-# For Humanoid-bench, you can set task=humanoid_h1-run as an example.
+# For Humanoid-bench, you can set task=humanoid_h1hand-run-v0 as an example.
 ```
 
 

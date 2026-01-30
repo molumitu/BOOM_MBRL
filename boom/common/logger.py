@@ -148,7 +148,7 @@ class Logger:
         wandb.init(
             project=self.project,
             entity=self.entity,
-            name=f"{cfg.task}.boom.{cfg.exp_name}.{cfg.seed}",
+            name=f"{cfg.task}-{cfg.extra}",
             tags=cfg_to_group(cfg, return_list=True) + [f"seed:{cfg.seed}"],
             dir=self._log_dir,
             config=OmegaConf.to_container(cfg, resolve=True),

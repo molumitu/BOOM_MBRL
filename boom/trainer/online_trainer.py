@@ -180,7 +180,7 @@ class OnlineTrainer(Trainer):
                 
                 num_updates = self.cfg.seed_steps if self._step == self.cfg.seed_steps else 1
                 if self._step == self.cfg.seed_steps:
-                    print("Pretraining agent on seed data...")
+                    print(f"Pretraining agent on seed data...({self._step})")
                 for _ in range(num_updates):
                     _train_metrics = self.agent.update(replay_sample, self._step)
                     train_metrics.update(_train_metrics)

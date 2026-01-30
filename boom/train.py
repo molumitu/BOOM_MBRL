@@ -1,5 +1,6 @@
 import os
 import sys
+from dm_control import suite
 
 if sys.platform != "darwin":
     os.environ["MUJOCO_GL"] = "osmesa"
@@ -11,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["WANDB_MODE"] = "offline"
+# os.environ["WANDB_MODE"] = "offline"
 
 import torch
 torch.set_num_threads(1)
@@ -26,6 +27,11 @@ from boom.common.parser import parse_cfg
 from boom.common.seed import set_seed
 from boom.common.buffer import Buffer
 from boom.envs import make_env
+# from boom.boom_alg_modify import BOOMV5 as BOOM
+# from boom.boom_alg_modify import BOOMV4 as BOOM
+# from boom.boom_alg_modify import BOOMV3 as BOOM
+# from boom.boom_alg_modify import BOOMV2 as BOOM
+# from boom.boom_alg_modify import BOOM
 from boom.boom_alg import BOOM
 from boom.trainer.online_trainer import OnlineTrainer
 from boom.common.logger import Logger
