@@ -270,7 +270,7 @@ class BOOM:
 		if self.cfg.action_dim >= 24 and self.cfg.action_dim <= 48:
 			self.lamda = 1/1000
 		else:
-			self.lamda = 1/100
+			self.lamda = 1/50
 		pi_loss = q_loss + (self.cfg.action_dim * self.lamda) * fkl_loss
 		pi_loss.backward()
 		torch.nn.utils.clip_grad_norm_(
