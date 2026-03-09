@@ -27,11 +27,6 @@ from boom.common.parser import parse_cfg
 from boom.common.seed import set_seed
 from boom.common.buffer import Buffer
 from boom.envs import make_env
-# from boom.boom_alg_modify import BOOMV5 as BOOM
-# from boom.boom_alg_modify import BOOMV4 as BOOM
-# from boom.boom_alg_modify import BOOMV3 as BOOM
-# from boom.boom_alg_modify import BOOMV2 as BOOM
-# from boom.boom_alg_modify import BOOM
 from boom.boom_alg import BOOM
 from boom.trainer.online_trainer import OnlineTrainer
 from boom.common.logger import Logger

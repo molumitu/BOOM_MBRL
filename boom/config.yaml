@@ -3,6 +3,9 @@ defaults:
 
 # environment
 task: dog-run
+# task: humanoid-run
+# task: walker-run
+# task: cartpole-balance
 obs: state
 boom: v1
 extra: ""
@@ -68,9 +71,9 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: tdmpc
-
-wandb_entity: zgj21-tsinghua-university
+# wandb_project: boom-multi-q
+wandb_project: boom-default
+wandb_entity: shallowdream0745-thu
 
 wandb_silent: false
 disable_wandb: false

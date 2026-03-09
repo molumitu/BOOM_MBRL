@@ -53,13 +53,14 @@ class WorldModel(nn.Module):
         self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
 
         # use torch.compile to speed up models
-        self._encoder = torch.compile(self._encoder['state'])
-        self._dynamics = torch.compile(self._dynamics)
-        self._reward = torch.compile(self._reward)
-        self._pi = torch.compile(self._pi)
-        self._Qs = torch.compile(self._Qs)
-        self._target_Qs = torch.compile(self._target_Qs)
-        self._task_emb = torch.compile(self._task_emb) if cfg.multitask else None
+        self._encoder = self._encoder['state']
+        # self._encoder = torch.compile(self._encoder['state'])
+        # self._dynamics = torch.compile(self._dynamics)
+        # self._reward = torch.compile(self._reward)
+        # self._pi = torch.compile(self._pi)
+        # self._Qs = torch.compile(self._Qs)
+        # self._target_Qs = torch.compile(self._target_Qs)
+        # self._task_emb = torch.compile(self._task_emb) if cfg.multitask else None
 
     @property
     def total_params(self):
