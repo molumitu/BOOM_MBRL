@@ -146,13 +146,13 @@ class BOOM:
 		Plan a sequence of actions using the learned world model.
 
 		Args:
-				z (torch.Tensor): Latent state from which to plan.
-				t0 (bool): Whether this is the first observation in the episode.
-				eval_mode (bool): Whether to use the mean of the action distribution.
-				task (Torch.Tensor): Task index (only used for multi-task experiments).
+			z (torch.Tensor): Latent state from which to plan.
+			t0 (bool): Whether this is the first observation in the episode.
+			eval_mode (bool): Whether to use the mean of the action distribution.
+			task (torch.Tensor): Task index for multi-task experiments.
 
 		Returns:
-				torch.Tensor: Action to take in the environment.
+			torch.Tensor: Action to take in the environment.
 		"""
 		if self.cfg.num_pi_trajs > 0:
 			pi_actions = torch.empty(
@@ -169,12 +169,15 @@ class BOOM:
 
 		# Initialize state and parameters
 		z = z.repeat(self.cfg.num_samples, 1)
+
 		mean = torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device)
 		std = self.cfg.max_std * torch.ones(
 			self.cfg.horizon, self.cfg.action_dim, device=self.device
 		)
+
 		if not t0:
 			mean[:-1] = self._prev_mean[1:]
+
 		actions = torch.empty(
 			self.cfg.horizon,
 			self.cfg.num_samples,
@@ -226,10 +229,12 @@ class BOOM:
 		actions = elite_actions[:, index] # torch.Size([3, 64, 38]) -> torch.Size([3, 38])
 		self._prev_mean = mean
 		mu, std = actions[0], std[0]
+
 		if not eval_mode:
 			a = mu + std * torch.randn(self.cfg.action_dim, device=std.device)
 		else:
 			a = mu
+
 		return a.clamp_(-1, 1), mu, std
 	
 	def update_pi(self, zs, action, mu, std, task, step):
