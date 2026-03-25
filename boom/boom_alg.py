@@ -43,8 +43,19 @@ class BOOM:
 		self.pi_optim = torch.optim.Adam(
 			self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5
 		)
+
+		if self.cfg.update_flow:
+			# Flow policy optimizer
+			self.flow_optim = torch.optim.Adam(
+				self.model._flow_pi.parameters(), 
+				lr=self.cfg.lr, 
+				eps=1e-5
+			)
+	
 		self.model.eval()
-		self.scale = RunningScale(cfg)
+		self.scale_pi = RunningScale(cfg)
+		if self.cfg.update_flow:
+			self.scale_flow = RunningScale(cfg)
 		self.log_pi_scale = RunningScale(cfg) # policy log-probability scale
 		self.cfg.iterations += 2 * int(
 			cfg.action_dim >= 20
@@ -154,20 +165,50 @@ class BOOM:
 		Returns:
 			torch.Tensor: Action to take in the environment.
 		"""
-		if self.cfg.num_pi_trajs > 0:
+		num_pi = self.cfg["num_pi_trajs"]
+		num_flow = self.cfg["num_flow_trajs"]
+		num_guide = num_pi + num_flow
+
+		assert num_guide <= self.cfg.num_samples, \
+			"num_pi_trajs + num_flow_trajs must be <= num_samples"
+
+		# --------------------------------------------------
+		# 1) Build guided trajectories from pi
+		# --------------------------------------------------
+		pi_actions = None
+		if num_pi > 0:
 			pi_actions = torch.empty(
 				self.cfg.horizon,
-				self.cfg.num_pi_trajs,
+				num_pi,
 				self.cfg.action_dim,
 				device=self.device,
 			)
-			_z = z.repeat(self.cfg.num_pi_trajs, 1)
+			_z = z.repeat(num_pi, 1)
 			for t in range(self.cfg.horizon - 1):
 				pi_actions[t] = self.model.pi(_z, task)[1]
 				_z = self.model.next(_z, pi_actions[t], task)
 			pi_actions[-1] = self.model.pi(_z, task)[1]
 
-		# Initialize state and parameters
+		# --------------------------------------------------
+		# 2) Build guided trajectories from flow
+		# --------------------------------------------------
+		flow_actions = None
+		if num_flow > 0:
+			flow_actions = torch.empty(
+				self.cfg.horizon,
+				num_flow,
+				self.cfg.action_dim,
+				device=self.device,
+			)
+			_z = z.repeat(num_flow, 1)
+			for t in range(self.cfg.horizon - 1):
+				flow_actions[t] = self.model.flow_policy(_z)
+				_z = self.model.next(_z, flow_actions[t], task)
+			flow_actions[-1] = self.model.flow_policy(_z)
+
+		# --------------------------------------------------
+		# 3) Initialize MPPI state and distribution
+		# --------------------------------------------------
 		z = z.repeat(self.cfg.num_samples, 1)
 
 		mean = torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device)
@@ -184,22 +225,34 @@ class BOOM:
 			self.cfg.action_dim,
 			device=self.device,
 		)
-		if self.cfg.num_pi_trajs > 0:
-			actions[:, : self.cfg.num_pi_trajs] = pi_actions
 
-		# Iterate MPPI
+		# Put guided trajectories first: [pi | flow | sampled]
+		col = 0
+		if num_pi > 0:
+			actions[:, col:col + num_pi] = pi_actions
+			col += num_pi
+		if num_flow > 0:
+			actions[:, col:col + num_flow] = flow_actions
+			col += num_flow
+
+		# --------------------------------------------------
+		# 4) Iterate MPPI
+		# --------------------------------------------------
 		for _ in range(self.cfg.iterations):
-			# Sample actions
-			actions[:, self.cfg.num_pi_trajs :] = (
-				mean.unsqueeze(1)
-				+ std.unsqueeze(1)
-				* torch.randn(
-					self.cfg.horizon,
-					self.cfg.num_samples - self.cfg.num_pi_trajs,
-					self.cfg.action_dim,
-					device=std.device,
-				)
-			).clamp(-1, 1)
+			# Sample only the non-guided trajectories
+			num_random = self.cfg.num_samples - num_guide
+			if num_random > 0:
+				actions[:, num_guide:] = (
+					mean.unsqueeze(1)
+					+ std.unsqueeze(1)
+					* torch.randn(
+						self.cfg.horizon,
+						num_random,
+						self.cfg.action_dim,
+						device=std.device,
+					)
+				).clamp(-1, 1)
+
 			if self.cfg.multitask:
 				actions = actions * self.model._action_masks[task]
 
@@ -219,14 +272,16 @@ class BOOM:
 
 			mean = torch.einsum('e,hea->ha', score, elite_actions) / score_sum
 
-			diff = elite_actions - mean.unsqueeze(1)  # (H, E, A)
+			diff = elite_actions - mean.unsqueeze(1)  # [H, E, A]
 			variance = torch.einsum('e,hea->ha', score, diff ** 2) / score_sum
 			std = torch.sqrt(variance).clamp_(self.cfg.min_std, self.cfg.max_std)
 
-		# Select action
-		score_tensor = score.squeeze() # torch.Size([64])
-		index = torch.multinomial(score_tensor, 1).item()
-		actions = elite_actions[:, index] # torch.Size([3, 64, 38]) -> torch.Size([3, 38])
+		# --------------------------------------------------
+		# 5) Select first action from elite set
+		# --------------------------------------------------
+		index = torch.multinomial(score, 1).item()
+		actions = elite_actions[:, index]   # [H, A]
+
 		self._prev_mean = mean
 		mu, std = actions[0], std[0]
 
@@ -236,26 +291,75 @@ class BOOM:
 			a = mu
 
 		return a.clamp_(-1, 1), mu, std
+
+	def update_flow(self, z, target_actions):
+		"""
+		Compute terminal mean flow matching loss.
+
+		Args:
+			z: [N, latent_dim]
+			target_actions: [N, action_dim]
+
+		Returns:
+			flow_bc_loss: scalar
+			info: dict
+		"""
+		N = z.shape[0]
+		device = z.device
+		dtype = z.dtype
+
+		x1 = target_actions
+		x0 = torch.randn_like(x1)
+
+		t = torch.rand(N, device=device, dtype=dtype) * (1.0 - 1e-3)   # [N]
+		t_exp = t[:, None]                                               # [N, 1]
+
+		# straight path: x_t = (1 - t)x0 + t x1
+		xt = (1.0 - t_exp) * x0 + t_exp * x1
+
+		target_vel = (x1 - x0)
+
+		flow_input = torch.cat([z, xt, t_exp], dim=-1)
+		pred_vel = self.model._flow_pi(flow_input)
+
+		flow_bc_loss = F.mse_loss(pred_vel, target_vel)
+
+		info = {
+			"flow_bc_loss": flow_bc_loss.detach(),
+			"flow_pred_abs": pred_vel.abs().mean().detach(),
+			"flow_target_abs": target_vel.abs().mean().detach(),
+			"flow_xt_abs": xt.abs().mean().detach(),
+			"flow_t_mean": t.mean().detach(),
+		}
+		return flow_bc_loss, info
 	
 	def update_pi(self, zs, action, mu, std, task, step):
 		"""
-		Update policy using a sequence of latent states.
+		Update Gaussian policy and mean-flow policy.
 
 		Args:
-				zs (torch.Tensor): Sequence of latent states.
-				action (torch.Tensor): Sequence of actions.
-				task (torch.Tensor): Task index (only used for multi-task experiments).
+			zs: [H, B, latent_dim]
+			action: [H, B, action_dim]
+			mu: [H, B, action_dim]
+			std: [H, B, action_dim]
+			task: task info
+			step: training step
 
 		Returns:
-				float: Loss of the policy update.
+			info: dict
 		"""
+		H, B, _ = zs.shape
+
+		# =========================
+		# 1) Update Gaussian Policy
+		# =========================
 		self.pi_optim.zero_grad(set_to_none=True)
 		self.model.track_q_grad(False)
 
 		_, pis, log_pis, log_std = self.model.pi(zs, task)
 		qs = self.model.Q(zs, pis, task, return_type="min")
-		self.scale.update(qs[0])
-		qs = self.scale(qs)
+		self.scale_pi.update(qs[0])
+		qs = self.scale_pi(qs)
 			
 		############### Compute max Q loss ###############
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
@@ -264,10 +368,11 @@ class BOOM:
 		############### Compute min KL loss ###############
 		action_dims = None if not self.cfg.multitask else self.model._action_masks.size(-1)
 		std = log_std.exp().detach()
-		std = torch.max(std, self.cfg.min_std * torch.ones_like(std))
+		std = torch.clamp(std, min=self.cfg.min_std)
+
 		eps = (pis - mu) / std
 		forward_kl = math.gaussian_logprob(eps, std.log(), size=action_dims).mean(dim=-1)
-		forward_kl = self.scale(forward_kl) if self.scale.value > 2.0 else torch.zeros_like(forward_kl)
+		forward_kl = self.scale_pi(forward_kl) if self.scale_pi.value > 2.0 else torch.zeros_like(forward_kl)
 		forward_kl = torch.softmax(qs.detach().squeeze(),dim=-1) * forward_kl
 		fkl_loss = - (forward_kl.sum(dim=-1) * rho).mean()
 		
@@ -278,9 +383,63 @@ class BOOM:
 			self.model._pi.parameters(), self.cfg.grad_clip_norm
 		)
 		self.pi_optim.step()
+
+		if self.cfg.update_flow:
+			# =========================
+			# 2) Update Mean Flow Policy
+			# =========================
+			self.flow_optim.zero_grad(set_to_none=True)
+
+			# flatten [H, B, ...] -> [H*B, ...]
+			z_flat = zs.reshape(H * B, -1).detach()
+			mu_flat = mu.reshape(H * B, -1).detach()
+
+			# differentiable flow actor loss
+			# flow_actions = self.model.flow_policy(z_flat)
+			# flow_q = self.model.Q(z_flat, flow_actions, task, return_type="min")
+			# self.scale_flow.update(qs[0])
+			# flow_q = self.scale_flow(qs) # [H*B, 1]
+
+			# supervised flow matching loss
+			# flow_bc_loss, flow_info = self.update_flow(z_flat, action.reshape(H*B, -1))
+			flow_bc_loss, flow_info = self.update_flow(z_flat, mu_flat)
+
+			# max Q loss
+			# flow_q = flow_q.reshape(H, B, 1)
+			# flow_q_loss = -((flow_q.mean(dim=(1, 2))) * rho).mean()
+
+			# flow_bc_coef = getattr(self.cfg, "flow_bc_coef", 1.0)
+			# total_flow_loss = flow_q_loss + flow_bc_coef * flow_bc_loss
+			total_flow_loss = flow_bc_loss
+
+			total_flow_loss.backward()
+			torch.nn.utils.clip_grad_norm_(
+				self.model._flow_pi.parameters(),
+				self.cfg.grad_clip_norm,
+			)
+			self.flow_optim.step()
+
 		self.model.track_q_grad(True)
 
-		return pi_loss.item(), q_loss.item(), fkl_loss.item()
+		info = {
+			"pi_loss": float(pi_loss.item()),
+			"pi_q_loss": float(q_loss.item()),
+			"pi_fkl_loss": float(fkl_loss.item()),
+			"pi_scale": float(self.scale_pi.value),
+		}
+
+		if self.cfg.update_flow:
+			info.update({
+				# "flow_scale": float(self.scale_flow.value),
+				"flow_bc_loss": float(flow_bc_loss.item()),
+				# "flow_q_loss": float(flow_q_loss.item()),
+				"flow_total_loss": float(total_flow_loss.item()),
+				"flow_pred_abs": float(flow_info["flow_pred_abs"].item()),
+				"flow_target_abs": float(flow_info["flow_target_abs"].item()),
+				"flow_xt_abs": float(flow_info["flow_xt_abs"].item()),
+				"flow_t_mean": float(flow_info["flow_t_mean"].item()),
+			})
+		return info
 
 	@torch.no_grad()
 	def _td_target(self, next_z, reward, task):
@@ -305,13 +464,7 @@ class BOOM:
 
 	def update(self, replay_sample, step):
 		"""
-		Main update function. Corresponds to one iteration of model learning.
-
-		Args:
-				buffer (common.buffer.Buffer): Replay buffer.
-
-		Returns:
-				dict: Dictionary of training statistics.
+		Main update function. One iteration of model learning.
 		"""
 		obs, action, mu, std, reward, task = replay_sample # mu and std are from Gaussian policy used for data collection	
 		
@@ -373,22 +526,27 @@ class BOOM:
 		)
 		self.optim.step()
 
-		# Update policy
-		pi_loss, pi_q_loss, pi_fkl_loss  = self.update_pi(_zs.detach(), action.detach(), mu.detach(), std.detach(), task, step)
-		
+		# Update policies
+		pi_info = self.update_pi(
+			_zs.detach(),
+			action.detach(),
+			mu.detach(),
+			std.detach(),
+			task,
+			step,
+		)
+
 		# Update target Q-functions
 		self.model.soft_update_target_Q()
 
 		# Return training statistics
 		self.model.eval()
-		return {
+		stats = {
 			"consistency_loss": float(consistency_loss.mean().item()),
 			"reward_loss": float(reward_loss.mean().item()),
 			"value_loss": float(value_loss.mean().item()),
-			"pi_loss": pi_loss,
-			"pi_q_loss": pi_q_loss,
-			"pi_fkl_loss": pi_fkl_loss,
 			"total_loss": float(total_loss.mean().item()),
 			"grad_norm": float(grad_norm),
-			"pi_scale": float(self.scale.value)
 		}
+		stats.update(pi_info)
+		return stats

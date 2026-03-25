@@ -35,6 +35,8 @@ class WorldModel(nn.Module):
             cfg.latent_dim + cfg.task_dim, 2 * [cfg.mlp_dim], 2 * cfg.action_dim
         )
 
+        self._flow_pi = layers.mlp(cfg.latent_dim + cfg.action_dim + 1, 2 * [cfg.mlp_dim], cfg.action_dim, )
+
         self._Qs = layers.Ensemble(
             [
                 layers.mlp(
@@ -160,6 +162,51 @@ class WorldModel(nn.Module):
             z = self.task_emb(z, task)
         z = torch.cat([z, a], dim=-1)
         return self._reward(z)
+
+
+    def _integrate(self, z, a, time_start, time_end):
+        """
+        Integrate the velocity field from time_start to time_end using midpoint method
+        """
+        flow_input = torch.cat([z, a, time_start], dim=1)
+        velocity_start = self._flow_pi(flow_input)
+        intermediate_state = a + velocity_start * (time_end - time_start)/2
+        
+        flow_input = torch.cat([z, intermediate_state, time_start + (time_end - time_start)/2], dim=1)
+        velocity_mid = self._flow_pi(flow_input)
+        action_t = a + velocity_mid * (time_end - time_start)
+
+        return action_t
+    
+    
+    def flow_policy(self, z, n_steps=10):
+        """
+        One-step terminal mean flow policy.
+
+        Args:
+            z: [B, latent_dim]
+
+        Returns:
+            actions: [B, action_dim]
+        """
+
+        B = z.shape[0]
+        device = z.device
+        dtype = z.dtype
+        
+        time_start = torch.zeros(B, 1, device=device)
+        time_step = 1.0 / n_steps
+        
+        action = torch.randn(B, self.cfg.action_dim, device=device, dtype=dtype)
+        action = torch.clamp(action,-1.0,1.0)
+
+        for i in range(n_steps):
+            time_end = time_start + time_step
+            action = self._integrate(z, action, time_start, time_end)
+            time_start = time_end
+            
+        action = torch.tanh(action)
+        return action
 
     def pi(self, z, task):
         """

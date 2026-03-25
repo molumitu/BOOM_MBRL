@@ -16,7 +16,7 @@ class OnlineTrainer(Trainer):
         self._start_time = time()
         self._nan_tensor = None
         self.replay_sample_list = []
-        
+        self._last_save_step = 0  # Track last save step for checkpointing
 
     def common_metrics(self):
         return dict(
@@ -24,6 +24,15 @@ class OnlineTrainer(Trainer):
             episode=self._ep_idx,
             total_time=time() - self._start_time,
         )
+
+    def save_checkpoint(self, identifier):
+        """Save model checkpoint to disk.
+        
+        Args:
+            identifier: Step number or name to identify this checkpoint
+        """
+        self.logger.save_agent(self.agent, identifier=str(identifier))
+        print(f"Checkpoint saved at step {self._step} with identifier: {identifier}")
 
     @torch.no_grad()
     def eval(self):
@@ -122,6 +131,13 @@ class OnlineTrainer(Trainer):
         while self._step <= self.cfg.steps:
             if self._step % self.cfg.eval_freq == 0:
                 eval_next = True
+            
+            # Periodic checkpoint saving
+            save_freq = getattr(self.cfg, 'save_freq', 100000)  # Default: every 100k steps
+            if self._step > 0 and self._step - self._last_save_step >= save_freq:
+                self.save_checkpoint(f"step_{self._step}")
+                self._last_save_step = self._step
+            
             if done:
                 if eval_next:
                     eval_metrics = self.eval()
