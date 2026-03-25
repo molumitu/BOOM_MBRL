@@ -24,9 +24,24 @@ class PixelWrapper(gym.Wrapper):
         self._render_size = render_size
 
     def _get_obs(self):
+        """Render and process image observation."""
+        # DMControl uses physics.render(height, width, camera_id)
+        # TimeStepToGymWrapper.render accepts (mode, width, height, camera_id)
+        # Default render is 640x480 (non-square), we need square 64x64
         frame = self.env.render(
-            mode="rgb_array", width=self._render_size, height=self._render_size
-        ).transpose(2, 0, 1)
+            width=self._render_size, 
+            height=self._render_size,
+            camera_id=0
+        )
+        
+        # Handle case where render returns tuple (new gymnasium)
+        if isinstance(frame, tuple):
+            frame = frame[0]
+        
+        # Transpose from [H, W, C] to [C, H, W]
+        if frame.ndim == 3:
+            frame = frame.transpose(2, 0, 1)
+        
         self._frames.append(frame)
         return torch.from_numpy(np.concatenate(self._frames))
 

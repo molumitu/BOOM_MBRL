@@ -55,13 +55,18 @@ class WorldModel(nn.Module):
         self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
 
         # use torch.compile to speed up models
-        self._encoder = torch.compile(self._encoder['state'])
-        self._dynamics = torch.compile(self._dynamics)
-        self._reward = torch.compile(self._reward)
-        self._pi = torch.compile(self._pi)
-        self._Qs = torch.compile(self._Qs)
-        self._target_Qs = torch.compile(self._target_Qs)
-        self._task_emb = torch.compile(self._task_emb) if cfg.multitask else None
+        # Select the appropriate encoder based on observation type
+        # if cfg.obs == "rgb":
+        #     self._encoder = self._encoder['rgb']
+        # else:
+        #     self._encoder = self._encoder['state']
+        # self._encoder = torch.compile(self._encoder)
+        # self._dynamics = torch.compile(self._dynamics)
+        # self._reward = torch.compile(self._reward)
+        # self._pi = torch.compile(self._pi)
+        # self._Qs = torch.compile(self._Qs)
+        # self._target_Qs = torch.compile(self._target_Qs)
+        # self._task_emb = torch.compile(self._task_emb) if cfg.multitask else None
 
     @property
     def total_params(self):
@@ -142,7 +147,7 @@ class WorldModel(nn.Module):
             obs = self.task_emb(obs, task)
         if self.cfg.obs == "rgb" and obs.ndim == 5:
             return torch.stack([self._encoder[self.cfg.obs](o) for o in obs])
-        return self._encoder(obs)
+        return self._encoder[self.cfg.obs](obs)
 
     def next(self, z, a, task):
         """

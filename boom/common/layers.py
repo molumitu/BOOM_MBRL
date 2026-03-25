@@ -156,15 +156,10 @@ def conv(in_shape, num_channels, act=None):
     layers = [
         ShiftAug(),
         PixelPreprocess(),
-        nn.Conv2d(in_shape[0], num_channels, 7, stride=2),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(num_channels, num_channels, 5, stride=2),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(num_channels, num_channels, 3, stride=2),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(num_channels, num_channels, 3, stride=1),
-        nn.Flatten(),
-    ]
+        nn.Conv2d(in_shape[0], num_channels, 7, stride=2), nn.ReLU(inplace=False),
+        nn.Conv2d(num_channels, num_channels, 5, stride=2), nn.ReLU(inplace=False),
+        nn.Conv2d(num_channels, num_channels, 3, stride=2), nn.ReLU(inplace=False),
+        nn.Conv2d(num_channels, num_channels, 3, stride=1), nn.Flatten()]
     if act:
         layers.append(act)
     return nn.Sequential(*layers)
@@ -174,10 +169,11 @@ def enc(cfg, out={}):
     """
     Returns a dictionary of encoders for each observation in the dict.
     """
-    out['state'] = mlp(
-        cfg.obs_shape['state'][0] + cfg.task_dim,
-        max(cfg.num_enc_layers - 1, 1) * [cfg.enc_dim],
-        cfg.latent_dim,
-        act=SimNorm(cfg),
-    )
+    for k in cfg.obs_shape.keys():
+        if k == 'state':
+            out[k] = mlp(cfg.obs_shape[k][0] + cfg.task_dim, max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim], cfg.latent_dim, act=SimNorm(cfg))
+        elif k == 'rgb':
+            out[k] = conv(cfg.obs_shape[k], cfg.num_channels, act=SimNorm(cfg))
+        else:
+            raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
     return nn.ModuleDict(out)

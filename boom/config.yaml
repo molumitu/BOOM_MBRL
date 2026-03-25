@@ -2,8 +2,8 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
-obs: state
+task: walker-run
+obs: rgb
 boom: v1
 
 # evaluation

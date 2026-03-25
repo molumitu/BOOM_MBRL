@@ -45,3 +45,7 @@ class TensorWrapper(gym.Wrapper):
             truncated,
             info,
         )
+
+    def render(self, **kwargs):
+        """Forward render calls to wrapped environment with all keyword arguments."""
+        return self.env.render(**kwargs)
