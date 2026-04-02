@@ -166,7 +166,7 @@ class BOOM:
 			torch.Tensor: Action to take in the environment.
 		"""
 		num_pi = self.cfg["num_pi_trajs"]
-		num_flow = self.cfg["num_flow_trajs"]
+		num_flow = self.cfg["num_flow_trajs"] if self.cfg["update_flow"] else 0
 		num_guide = num_pi + num_flow
 
 		assert num_guide <= self.cfg.num_samples, \

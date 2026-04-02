@@ -13,6 +13,7 @@ task: dog-run
 # task: mw-button-press
 obs: state
 boom: v1
+update_flow: true
 extra: "flow"
 
 # environment type: dm_control, myosuite, humanoid, gym, maniskill, metaworld
@@ -60,7 +61,6 @@ max_std: 2
 temperature: 0.5
 
 # flow
-update_flow: true
 flow_bc_coef: 0.1
 
 # actor
