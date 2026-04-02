@@ -6,9 +6,20 @@ task: dog-run
 # task: humanoid-run
 # task: walker-run
 # task: cartpole-balance
+# task: myo-reach
+# task: myo-pose
+# task: myo-obj-hold
+# task: lift-cube
+# task: mw-button-press
 obs: state
 boom: v1
-extra: ""
+extra: "flow"
+
+# environment type: dm_control, myosuite, humanoid, gym, maniskill, metaworld
+env_type: dm_control
+# env_type: myosuite
+# env_type: maniskill
+# env_type: metaworld
 
 # evaluation
 checkpoint: ???
@@ -19,7 +30,7 @@ eval_value: false
 eval_freq: 50000
 
 # training
-steps: 2_000_000 # env step = steps * action_repeat
+steps: 1_001_000 # env step = steps * action_repeat
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1

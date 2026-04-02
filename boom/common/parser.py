@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from datetime import datetime
 
 import hydra
 from omegaconf import OmegaConf
@@ -35,12 +36,17 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
             pass
 
     # Convenience
+    # Generate timestamp in format: mmdd-HHMMSS
+    timestamp = datetime.now().strftime("%m%d-%H%M%S")
+    # Get extra tag from config, default to empty string if not present
+    extra_tag = cfg.get("extra", "")
+
     cfg.work_dir = (
         Path(hydra.utils.get_original_cwd())
         / "logs"
         / cfg.task
         / str(cfg.seed)
-        / cfg.exp_name
+        / f"{timestamp}-{extra_tag}"
     )
     cfg.task_title = cfg.task.replace("-", " ").title()
     cfg.bin_size = (cfg.vmax - cfg.vmin) / (

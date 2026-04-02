@@ -60,20 +60,34 @@ def make_env(cfg):
     """
     Make an environment.
     """
-    gymflag = False
     if cfg.multitask:
         env = make_multitask_env(cfg)
 
     else:
         env = None
-        env = make_dm_control_env(cfg)
-        # env = make_humanoid_env(cfg)
-        # env = make_gym_env(cfg)
-        
+        env_type = cfg.get("env_type", "dm_control")
+
+        # Select environment maker based on env_type config
+        env_makers = {
+            "dm_control": make_dm_control_env,
+            "myosuite": make_myosuite_env,
+            "humanoid": make_humanoid_env,
+            "gym": make_gym_env,
+            "maniskill": make_maniskill_env,
+            "metaworld": make_metaworld_env,
+        }
+
+        env_maker = env_makers.get(env_type)
+        if env_maker is None:
+            raise ValueError(f"Unknown env_type: {env_type}. Available types: {list(env_makers.keys())}")
+
+        env = env_maker(cfg)
         if env is None:
             raise ValueError(
-                f'Failed to make environment "{cfg.task}": please verify that dependencies are installed and that the task exists.'
+                f'Failed to make environment "{cfg.task}" with env_type "{env_type}": '
+                'please verify that dependencies are installed and that the task exists.'
             )
+        gymflag = env_type in {"gym", "myosuite", "maniskill"}
         env = TensorWrapper(env)
     if cfg.get("obs", "state") == "rgb":
         env = PixelWrapper(cfg, env)
