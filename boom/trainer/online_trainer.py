@@ -42,7 +42,7 @@ class OnlineTrainer(Trainer):
             if self.cfg.save_video:
                 self.logger.video.init(self.env, enabled=(i == 0))
             while not done:
-                action, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True)
+                action, _, _, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True)
                 obs, reward, done, truncated, info = self.env.step(action)
                 done = done or truncated
                 ep_reward += reward
@@ -59,7 +59,7 @@ class OnlineTrainer(Trainer):
             for i in range(self.cfg.eval_episodes):
                 obs, done, ep_reward, t = self.env.reset()[0], False, 0, 0
                 while not done:
-                    action, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True, use_pi=True)
+                    action, _, _, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True, use_pi=True)
                     obs, reward, done, truncated, info = self.env.step(action)
                     done = done or truncated
                     ep_reward += reward
@@ -84,7 +84,7 @@ class OnlineTrainer(Trainer):
         for _ in range(n_samples):
             obs, done, ep_reward, t = self.env.reset()[0], False, 0, 0
             while not done:
-                action, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True, use_pi=True)
+                action, _, _, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True, use_pi=True)
                 obs, reward, done, truncated, _ = self.env.step(action)
                 done = done or truncated
                 ep_reward += reward * (self.agent.discount ** t)
@@ -93,7 +93,7 @@ class OnlineTrainer(Trainer):
 
         for _ in range(n_samples):
             obs = self.env.reset()[0]
-            action, _, _ = self.agent.act(obs, t0=True, eval_mode=True, use_pi=True)
+            action, _, _, _, _ = self.agent.act(obs, t0=True, eval_mode=True, use_pi=True)
             task = None
             obs_encoded = self.agent.model.encode(obs.to(device), task)
             q_val = self.agent.model.Q(obs_encoded, action.to(device), task, return_type="avg")
@@ -104,7 +104,7 @@ class OnlineTrainer(Trainer):
             q_value=np.nanmean(q_values),
         )
 
-    def to_td(self, obs, action=None, mu=None, std=None, reward=None):
+    def to_td(self, obs, action=None, mu=None, std=None, reward=None, mpc_action_samples=None, mpc_action_weights=None):
         """Creates a TensorDict for a new episode."""
         obs = TensorDict(obs, batch_size=(), device="cpu") if isinstance(obs, dict) else obs.unsqueeze(0).cpu()
 
@@ -117,13 +117,25 @@ class OnlineTrainer(Trainer):
         if reward is None:
             reward = torch.tensor(float("nan"))
 
-        return TensorDict({
+        # MPC samples and weights for flow matching supervision
+        if mpc_action_samples is None:
+            # Create dummy MPC samples with same action repeated
+            num_elites = getattr(self.cfg, 'num_elites', 64)
+            mpc_action_samples = action.unsqueeze(0).repeat(num_elites, 1)
+        if mpc_action_weights is None:
+            num_elites = getattr(self.cfg, 'num_elites', 64)
+            mpc_action_weights = torch.ones(num_elites, dtype=action.dtype) / num_elites
+
+        td_dict = {
             "obs": obs,
             "action": action.unsqueeze(0),
             "mu": mu.unsqueeze(0),
             "std": std.unsqueeze(0),
             "reward": reward.unsqueeze(0),
-        }, batch_size=(1,))
+            "mpc_action_samples": mpc_action_samples.unsqueeze(0),
+            "mpc_action_weights": mpc_action_weights.unsqueeze(0),
+        }
+        return TensorDict(td_dict, batch_size=(1,))
 
     def train(self):
         train_metrics, done, eval_next = {}, True, True
@@ -168,15 +180,16 @@ class OnlineTrainer(Trainer):
                 self._tds = [self.to_td(obs)]
 
             if self._step > self.cfg.seed_steps:
-                action, mu, std = self.agent.act(obs, t0=(len(self._tds) == 1))
+                action, mu, std, mpc_samples, mpc_weights = self.agent.act(obs, t0=(len(self._tds) == 1))
             else:
                 # action, mu, std = self.agent.act(obs, t0=(len(self._tds) == 1))
                 action = self.env.rand_act()
                 mu, std = action.clone(), torch.full_like(action, math.exp(self.cfg.log_std_max))
+                mpc_samples, mpc_weights = None, None
 
             obs, reward, done, truncated, info = self.env.step(action)
             done = done or truncated
-            self._tds.append(self.to_td(obs, action, mu, std, reward))
+            self._tds.append(self.to_td(obs, action, mu, std, reward, mpc_samples, mpc_weights))
             
             if self._step >= self.cfg.seed_steps:
                 if self._step % 100 == 0 \
@@ -185,9 +198,9 @@ class OnlineTrainer(Trainer):
                     self.replay_sample_list = []
                     # print("Replaying new data from buffer...")
                     for _ in range(100):
-                        replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task = self.buffer.sample()
+                        replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_mpc_samples, replay_mpc_weights, replay_task = self.buffer.sample()
                         self.replay_sample_list.append(
-                            (replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task)
+                            (replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_mpc_samples, replay_mpc_weights, replay_task)
                         )
                     self.count = 0
 

@@ -14,7 +14,7 @@ task: dog-run
 obs: state
 boom: v1
 update_flow: true
-extra: "flow"
+extra: ""
 
 # environment type: dm_control, myosuite, humanoid, gym, maniskill, metaworld
 env_type: dm_control
@@ -61,7 +61,8 @@ max_std: 2
 temperature: 0.5
 
 # flow
-flow_bc_coef: 0.1
+flow_q_coef: 1.0
+flow_mode: sample  # sample | mu | action
 
 # actor
 log_std_min: -10
@@ -88,7 +89,7 @@ simnorm_dim: 8
 
 # logging
 # wandb_project: boom-multi-q
-wandb_project: boom-flow
+wandb_project: flow
 wandb_entity: shallowdream0745-thu
 
 wandb_silent: false

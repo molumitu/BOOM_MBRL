@@ -117,14 +117,19 @@ class BOOM:
 				task (int): Task index (only used for multi-task experiments).
 
 		Returns:
-				torch.Tensor: Action to take in the environment.
+				action: Action to take in the environment.
+				mu: Mean action.
+				std: Std of action distribution.
+				mpc_samples: MPC action samples [num_elites, act_dim] or None.
+				mpc_weights: MPC action weights [num_elites] or None.
 		"""
 		obs = obs.to(self.device, non_blocking=True).unsqueeze(0)
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		z = self.model.encode(obs, task)
 		if self.cfg.mpc and not use_pi and not use_diffusion:
-			a, mu, std = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)
+			a, mu, std, mpc_samples, mpc_weights = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)
+			return a.cpu(), mu.cpu(), std.cpu(), mpc_samples.cpu(), mpc_weights.cpu()
 		elif use_pi:
 			mu, pi, log_pi, log_std = self.model.pi(z, task)
 			if eval_mode:
@@ -132,7 +137,9 @@ class BOOM:
 			else:
 				a = pi[0]
 			mu, std = mu[0], log_std.exp()[0]
-		return a.cpu(), mu.cpu(), std.cpu()
+			return a.cpu(), mu.cpu(), std.cpu(), None, None
+		else:
+			return a.cpu(), mu.cpu(), std.cpu(), None, None
 
 	@torch.no_grad()
 	def _estimate_value(self, z, actions, task, horizon, eval_mode=False):
@@ -290,15 +297,23 @@ class BOOM:
 		else:
 			a = mu
 
-		return a.clamp_(-1, 1), mu, std
+		# mpc_samples: [num_elites, action_dim] - elite actions at first timestep
+		# mpc_weights: [num_elites] - normalized weights of elite actions
+		mpc_samples = elite_actions[0]  # [E, A]
+		mpc_weights = score.clone()  # [E], already normalized
 
-	def update_flow(self, z, target_actions):
+		return a.clamp_(-1, 1), mu, std, mpc_samples, mpc_weights
+
+	def update_flow(self, z, mpc_action_samples=None, mpc_action_weights=None, mu=None, action=None):
 		"""
-		Compute terminal mean flow matching loss.
+		Compute flow matching loss with different supervision targets.
 
 		Args:
 			z: [N, latent_dim]
-			target_actions: [N, action_dim]
+			mpc_action_samples: [N, K, action_dim] - MPC samples (sample mode)
+			mpc_action_weights: [N, K] - MPC weights (sample mode)
+			mu: [N, action_dim] - Gaussian policy mean (mu mode)
+			action: [N, action_dim] - Executed action (action mode)
 
 		Returns:
 			flow_bc_loss: scalar
@@ -308,9 +323,37 @@ class BOOM:
 		device = z.device
 		dtype = z.dtype
 
-		x1 = target_actions
+		# Get mode from config
+		flow_mode = getattr(self.cfg, "flow_mode", "sample")
+
+		# Select supervision target based on mode
+		if flow_mode == "sample":
+			# Sample from MPC distribution
+			assert mpc_action_samples is not None, "sample mode requires mpc_action_samples"
+			assert mpc_action_weights is not None, "sample mode requires mpc_action_weights"
+			
+			N, K, action_dim = mpc_action_samples.shape
+			sample_indices = torch.multinomial(mpc_action_weights, num_samples=1).squeeze(-1)  # [N]
+			batch_indices = torch.arange(N, device=device)
+			x1 = mpc_action_samples[batch_indices, sample_indices]
+
+		elif flow_mode == "mu":
+			# Use Gaussian policy mean
+			assert mu is not None, "mu mode requires mu parameter"
+			x1 = mu
+
+		elif flow_mode == "action":
+			# Use executed action
+			assert action is not None, "action mode requires action parameter"
+			x1 = action
+
+		else:
+			raise ValueError(f"Unknown flow_mode: {flow_mode}. Must be 'sample', 'mu', or 'action'")
+
+		# Sample x0 from standard normal
 		x0 = torch.randn_like(x1)
 
+		# Sample random time
 		t = torch.rand(N, device=device, dtype=dtype) * (1.0 - 1e-3)   # [N]
 		t_exp = t[:, None]                                               # [N, 1]
 
@@ -333,7 +376,7 @@ class BOOM:
 		}
 		return flow_bc_loss, info
 	
-	def update_pi(self, zs, action, mu, std, task, step):
+	def update_pi(self, zs, action, mu, std, mpc_action_samples, mpc_action_weights, task, step):
 		"""
 		Update Gaussian policy and mean-flow policy.
 
@@ -342,6 +385,8 @@ class BOOM:
 			action: [H, B, action_dim]
 			mu: [H, B, action_dim]
 			std: [H, B, action_dim]
+			mpc_action_samples: [H, B, K, action_dim] - MPC samples for each state
+			mpc_action_weights: [H, B, K] - MPC weights for each state
 			task: task info
 			step: training step
 
@@ -386,32 +431,69 @@ class BOOM:
 
 		if self.cfg.update_flow:
 			# =========================
-			# 2) Update Mean Flow Policy
+			# 2) Update Flow Policy with Hybrid Loss
 			# =========================
 			self.flow_optim.zero_grad(set_to_none=True)
 
 			# flatten [H, B, ...] -> [H*B, ...]
 			z_flat = zs.reshape(H * B, -1).detach()
-			mu_flat = mu.reshape(H * B, -1).detach()
 
-			# differentiable flow actor loss
-			# flow_actions = self.model.flow_policy(z_flat)
-			# flow_q = self.model.Q(z_flat, flow_actions, task, return_type="min")
-			# self.scale_flow.update(qs[0])
-			# flow_q = self.scale_flow(qs) # [H*B, 1]
+			# Prepare data based on flow_mode
+			flow_mode = getattr(self.cfg, "flow_mode", "sample")
 
-			# supervised flow matching loss
-			# flow_bc_loss, flow_info = self.update_flow(z_flat, action.reshape(H*B, -1))
-			flow_bc_loss, flow_info = self.update_flow(z_flat, mu_flat)
+			if flow_mode == "sample":
+				# Reshape MPC samples and weights: [H, B, K, A] -> [H*B, K, A]
+				mpc_samples_flat = mpc_action_samples.reshape(H * B, -1, action.shape[-1])
+				mpc_weights_flat = mpc_action_weights.reshape(H * B, -1)
+				mu_flat = None
+				action_flat = None
+			elif flow_mode == "mu":
+				mpc_samples_flat = None
+				mpc_weights_flat = None
+				mu_flat = mu.reshape(H * B, -1).detach()
+				action_flat = None
+			elif flow_mode == "action":
+				mpc_samples_flat = None
+				mpc_weights_flat = None
+				mu_flat = None
+				action_flat = action.reshape(H * B, -1).detach()
 
-			# max Q loss
-			# flow_q = flow_q.reshape(H, B, 1)
-			# flow_q_loss = -((flow_q.mean(dim=(1, 2))) * rho).mean()
+				# ========================================
+				# Part 1: Flow Matching Loss (监督项)
+				# ========================================
+				flow_bc_loss, flow_info = self.update_flow(
+					z_flat,
+					mpc_action_samples=mpc_samples_flat,
+					mpc_action_weights=mpc_weights_flat,
+					mu=mu_flat,
+					action=action_flat
+				)
 
-			# flow_bc_coef = getattr(self.cfg, "flow_bc_coef", 1.0)
-			# total_flow_loss = flow_q_loss + flow_bc_coef * flow_bc_loss
-			total_flow_loss = flow_bc_loss
+			# ========================================
+			# Part 2: Max Q Actor Loss (强化学习项)
+			# ========================================
+			# Freeze critic, only update flow policy
+			self.model.track_q_grad(False)
 
+			# Generate actions from flow policy (fully differentiable)
+			a_flow = self.model.flow_policy(z_flat)  # [H*B, action_dim]
+
+			# Compute Q-values using shared critic
+			flow_q = self.model.Q(z_flat, a_flow, task, return_type="min")  # [H*B, 1]
+
+			# Actor loss: maximize Q-values
+			flow_q_loss = -flow_q.mean()
+
+			# Restore critic gradient tracking
+			self.model.track_q_grad(True)
+
+			# ========================================
+			# Part 3: Combine Losses
+			# ========================================
+			flow_q_coef = getattr(self.cfg, "flow_q_coef", 1.0)
+			total_flow_loss = flow_bc_loss + flow_q_coef * flow_q_loss
+
+			# Backward and update
 			total_flow_loss.backward()
 			torch.nn.utils.clip_grad_norm_(
 				self.model._flow_pi.parameters(),
@@ -419,7 +501,6 @@ class BOOM:
 			)
 			self.flow_optim.step()
 
-		self.model.track_q_grad(True)
 
 		info = {
 			"pi_loss": float(pi_loss.item()),
@@ -432,7 +513,7 @@ class BOOM:
 			info.update({
 				# "flow_scale": float(self.scale_flow.value),
 				"flow_bc_loss": float(flow_bc_loss.item()),
-				# "flow_q_loss": float(flow_q_loss.item()),
+				"flow_q_loss": float(flow_q_loss.item()),
 				"flow_total_loss": float(total_flow_loss.item()),
 				"flow_pred_abs": float(flow_info["flow_pred_abs"].item()),
 				"flow_target_abs": float(flow_info["flow_target_abs"].item()),
@@ -466,8 +547,11 @@ class BOOM:
 		"""
 		Main update function. One iteration of model learning.
 		"""
-		obs, action, mu, std, reward, task = replay_sample # mu and std are from Gaussian policy used for data collection	
-		
+		obs, action, mu, std, reward, mpc_action_samples, mpc_action_weights, task = replay_sample
+		# mu and std are from Gaussian policy used for data collection
+		# mpc_action_samples: [H, B, K, action_dim] - MPC samples for each state
+		# mpc_action_weights: [H, B, K] - MPC weights for each state
+
 		# Compute targets
 		with torch.no_grad():
 			next_z = self.model.encode(obs[1:], task)
@@ -532,6 +616,8 @@ class BOOM:
 			action.detach(),
 			mu.detach(),
 			std.detach(),
+			mpc_action_samples.detach(),
+			mpc_action_weights.detach(),
 			task,
 			step,
 		)
