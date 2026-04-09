@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Raw experiments (update_flow=false)
+# Exit on error, undefined variables, and pipe failures
+set -euo pipefail
 
-# DM Control tasks
-declare -a DM_CONTROL_TASKS=("dog-run" "humanoid-run" "walker-run" "humanoid-walk")
+# Raw experiments (update_flow=false)
 
 # MyoSuite tasks
 declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-hold-hard")
@@ -12,14 +12,6 @@ declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-
 declare -a SEEDS=(11 12 13 14 15)
 
 echo "Starting raw experiments (update_flow=false)..."
-
-# Run DM Control tasks
-for task in "${DM_CONTROL_TASKS[@]}"; do
-    for seed in "${SEEDS[@]}"; do
-        echo "Running dm_control task: $task, seed: $seed"
-        python boom/train.py task=$task env_type=dm_control update_flow=false seed=$seed exp_name=dmc_flow_${task} extra="raw"
-    done
-done
 
 # Run MyoSuite tasks
 for task in "${MYOSUITE_TASKS[@]}"; do
