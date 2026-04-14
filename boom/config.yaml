@@ -2,8 +2,8 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
-# task: humanoid-run
+# task: dog-run
+task: humanoid-run
 # task: walker-run
 # task: cartpole-balance
 # task: myo-reach
@@ -54,7 +54,7 @@ iterations: 6
 num_samples: 512
 num_elites: 64
 num_pi_trajs: 24
-num_flow_trajs: 24
+num_flow_trajs: 48
 horizon: 3
 min_std: 0.05
 max_std: 2
@@ -62,7 +62,7 @@ temperature: 0.5
 
 # flow
 flow_q_coef: 1.0
-flow_mode: sample  # sample | mu | action
+flow_mode: action  # sample | mu | action
 
 # actor
 log_std_min: -10
