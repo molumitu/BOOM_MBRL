@@ -18,6 +18,7 @@ def missing_dependencies(task):
 from boom.envs.dmcontrol import make_env as make_dm_control_env
 from boom.envs.humanoid import make_env as make_humanoid_env
 from boom.envs.gymenv import make_env as make_gym_env
+from boom.envs.four_goal import make_env as make_four_goal_env
 try:
     from boom.envs.maniskill import make_env as make_maniskill_env
 except:
@@ -73,6 +74,7 @@ def make_env(cfg):
             "myosuite": make_myosuite_env,
             "humanoid": make_humanoid_env,
             "gym": make_gym_env,
+            "four_goal": make_four_goal_env,
             "maniskill": make_maniskill_env,
             "metaworld": make_metaworld_env,
         }
