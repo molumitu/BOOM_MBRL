@@ -156,7 +156,8 @@ def evaluate_model(model_path, config_path, task_name, num_episodes=5, save_dir=
 
         while not done:
             # Get action from agent
-            action, _, _ = agent.act(obs, t0=(t == 0), eval_mode=True)
+            result = agent.act(obs, t0=(t == 0), eval_mode=True)
+            action = result[0]  # Take only the action from the result
 
             # Step environment
             obs, reward, done, truncated, info = env.step(action)
