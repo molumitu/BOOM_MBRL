@@ -7,10 +7,10 @@ set -euo pipefail
 
 # MyoSuite tasks
 # declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-hold-hard")
-declare -a MYOSUITE_TASKS=("myo-pose" "myo-pose-hard" "myo-pen-twirl" "myo-pen-twirl-hard" "myo-key-turn" "myo-key-turn-hard")
+declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-hold-hard" "myo-pose" "myo-pose-hard" "myo-pen-twirl" "myo-pen-twirl-hard" "myo-key-turn" "myo-key-turn-hard")
 
 # Seeds to run
-declare -a SEEDS=(11)
+declare -a SEEDS=(13 12 11)
 # declare -a SEEDS=(11 12 13 14 15)
 
 echo "Starting flow experiments (update_flow=true)..."
