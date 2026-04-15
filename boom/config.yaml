@@ -15,6 +15,7 @@ obs: state
 boom: v1
 update_flow: true
 extra: ""
+compile: true
 
 # environment type: dm_control, myosuite, humanoid, gym, maniskill, metaworld
 # env_type: dm_control

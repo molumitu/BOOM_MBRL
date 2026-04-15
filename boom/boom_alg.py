@@ -69,6 +69,16 @@ class BOOM:
 			else self._get_discount(cfg.episode_length)
 		)
 
+		# Apply torch.compile if enabled
+		if getattr(cfg, 'compile', False):
+			self.model._encoder = torch.compile(self.model._encoder)
+			self.model._dynamics = torch.compile(self.model._dynamics)
+			self.model._reward = torch.compile(self.model._reward)
+			self.model._Qs = torch.compile(self.model._Qs)
+			self.model._pi = torch.compile(self.model._pi)
+			if self.cfg.update_flow:
+				self.model._flow_pi = torch.compile(self.model._flow_pi)
+
 	def _get_discount(self, episode_length):
 		"""
 		Returns discount factor for a given episode length.
