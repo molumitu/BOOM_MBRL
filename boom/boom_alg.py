@@ -448,8 +448,6 @@ class BOOM:
 			# Actor loss: maximize Q-values
 			flow_q_loss = -flow_q.mean()
 
-			# Restore critic gradient tracking
-			self.model.track_q_grad(True)
 
 			# ========================================
 			# Part 3: Combine Losses
@@ -464,6 +462,9 @@ class BOOM:
 				self.cfg.grad_clip_norm,
 			)
 			self.flow_optim.step()
+			
+		# Restore critic gradient tracking
+		self.model.track_q_grad(True)
 
 
 		info = {
