@@ -67,7 +67,6 @@ def get_config(policy_type='mlp', seed=1, steps=100_000):
         # Flow-specific parameters
         'update_flow': (policy_type == 'flow'),
         'flow_q_coef': 1.0,
-        'flow_mode': 'action',
 
         # Actor parameters
         'log_std_min': -10,

@@ -70,7 +70,6 @@ class TrainingConfig:
         # Flow-specific parameters
         self.update_flow = (policy_type == 'flow')
         self.flow_q_coef = 1.0
-        self.flow_mode = 'action'
 
         # Actor parameters
         self.log_std_min = -10

@@ -64,7 +64,6 @@ def get_config(policy_type='mlp'):
 
         'update_flow': (policy_type == 'flow'),
         'flow_q_coef': 1.0,
-        'flow_mode': 'sample',
 
         'log_std_min': -10,
         'log_std_max': 2,

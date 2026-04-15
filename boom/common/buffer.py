@@ -88,10 +88,8 @@ class Buffer:
         mu = td["mu"][1:]
         std = td["std"][1:]
         reward = td["reward"][1:].unsqueeze(-1)
-        mpc_action_samples = td["mpc_action_samples"][1:] if "mpc_action_samples" in td.keys() else None
-        mpc_action_weights = td["mpc_action_weights"][1:] if "mpc_action_weights" in td.keys() else None
         task = td["task"][0] if "task" in td.keys() else None
-        return self._to_device(obs, action, mu, std, reward, mpc_action_samples, mpc_action_weights, task)
+        return self._to_device(obs, action, mu, std, reward, task)
 
     def add(self, td):
         """Add an episode to the buffer."""
