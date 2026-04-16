@@ -5,6 +5,7 @@ Simple training script for four-goal navigation using existing BOOM infrastructu
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -61,12 +62,12 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
         'num_flow_trajs': 48 if policy_type == 'flow' else 0,
         'horizon': 3,
         'min_std': 0.05,
-        'max_std': 2.0,
-        'temperature': 0.5,
+        'max_std': 1.0,
+        'temperature': 10,
 
         # Flow-specific parameters
         'update_flow': (policy_type == 'flow'),
-        'flow_q_coef': 1.0,
+        'flow_q_coef': 0.0,
 
         # Actor parameters
         'log_std_min': -10,
@@ -80,11 +81,11 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
         # Architecture
         'model_size': 'normal',
-        'num_enc_layers': 2,
-        'enc_dim': 256,
+        'num_enc_layers': 1,
+        'enc_dim': 32,
         'num_channels': 32,
-        'mlp_dim': 512,
-        'latent_dim': 512,
+        'mlp_dim': 64,
+        'latent_dim': 64,
         'task_dim': 0,
         'num_q': 5,
         'num_v': 5,
@@ -96,12 +97,14 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
         'multitask': False,
 
         # Evaluation
-        'eval_episodes': 20,
+        'eval_episodes': 10,
         'eval_freq': 1000,
-        'eval_pi': True,
+        'eval_pi': False,
         'eval_value': False,
-        'eval_diffusion': False,
+        'eval_flow': (policy_type == 'flow'),
+        'eval_mode': False,
         'save_video': False,
+        'save_traj': True,  # Save trajectories for visualization
 
         # Logging
         'exp_name': f'four_goal_{policy_type}_seed{seed}',
@@ -116,7 +119,8 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
     }
 
     # Set working directory
-    work_dir = project_root / 'toy_exp' / 'results' / cfg['exp_name']
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    work_dir = project_root / 'toy_exp' / 'results' / cfg['exp_name'] / timestamp
     os.makedirs(work_dir, exist_ok=True)
     cfg['work_dir'] = work_dir  # Keep as Path object
     cfg['data_dir'] = work_dir
@@ -139,11 +143,11 @@ def main():
     parser.add_argument('--policy_type', type=str, default='mlp',
                         choices=['mlp', 'flow'],
                         help='Policy type')
-    parser.add_argument('--steps', type=int, default=100_000,
+    parser.add_argument('--steps', type=int, default=10000,
                         help='Number of training steps')
     parser.add_argument('--seed', type=int, default=1,
                         help='Random seed')
-    parser.add_argument('--eval_freq', type=int, default=5_000,
+    parser.add_argument('--eval_freq', type=int, default=500,
                         help='Evaluation frequency')
 
     args = parser.parse_args()
@@ -158,6 +162,7 @@ def main():
     print("=" * 70)
     print(f"Steps: {cfg.steps:,}")
     print(f"Seed: {cfg.seed}")
+    print(f"Update_flow: {cfg.update_flow}")
     print(f"Work Dir: {cfg.work_dir}")
     print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
     print("=" * 70)

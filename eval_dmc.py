@@ -107,6 +107,7 @@ def evaluate_model(model_path, config_path, task_name, num_episodes=5, save_dir=
     cfg.env_type = "dm_control"
     cfg.eval_episodes = num_episodes
     cfg.task_dim = 0
+    cfg.compile = False
 
     # Disable struct mode to allow setting missing required values
     OmegaConf.set_struct(cfg, False)
