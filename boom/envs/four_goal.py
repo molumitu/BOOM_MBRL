@@ -23,6 +23,7 @@ from typing import Tuple, Optional, List, Dict
 import gymnasium as gym
 from gymnasium import spaces
 import os
+import imageio
 
 
 class FourGoalNavigationEnv(gym.Env):
@@ -360,14 +361,29 @@ if __name__ == "__main__":
     print(f"  Step size: {env.step_size}")
     print(f"  Max steps: {env.max_steps}")
 
-    # Run a few random episodes
+    # Create test_video directory if it doesn't exist
+    video_dir = "test_video"
+    os.makedirs(video_dir, exist_ok=True)
+
+    # Run a few random episodes and save videos
     for ep in range(3):
         obs, info = env.reset(seed=ep)
         print(f"\n=== Episode {ep + 1} ===")
 
+        # Collect frames for video
+        frames = []
+
+        # Render initial state
+        frame = env.render(mode='rgb_array')
+        frames.append(frame)
+
         for step in range(env.max_steps):
             action = env.action_space.sample()
             obs, reward, terminated, truncated, info = env.step(action)
+
+            # Render after each step
+            frame = env.render(mode='rgb_array')
+            frames.append(frame)
 
             if terminated:
                 print(f"✓ Reached {info['reached_which']} goal in {step + 1} steps!")
@@ -375,3 +391,11 @@ if __name__ == "__main__":
             elif truncated:
                 print(f"✗ Truncated at step {step + 1}")
                 break
+
+        # Save video for this episode
+        video_path = os.path.join(video_dir, f"episode_{ep + 1}.mp4")
+        imageio.mimsave(video_path, frames, fps=env.metadata['render_fps'])
+        print(f"  Video saved to: {video_path}")
+
+    # Clean up
+    env.close()

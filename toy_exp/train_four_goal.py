@@ -22,7 +22,7 @@ from boom.common.buffer import Buffer
 from boom.common.logger import Logger
 
 
-def get_config(policy_type='mlp', seed=1, steps=100_000):
+def get_config(policy_type='mlp', seed=1, steps=10_000):
     """Get training configuration as OmegaConf."""
     cfg = {
         # Task and environment
@@ -97,7 +97,7 @@ def get_config(policy_type='mlp', seed=1, steps=100_000):
 
         # Evaluation
         'eval_episodes': 20,
-        'eval_freq': 5_000,
+        'eval_freq': 1000,
         'eval_pi': True,
         'eval_value': False,
         'eval_diffusion': False,
