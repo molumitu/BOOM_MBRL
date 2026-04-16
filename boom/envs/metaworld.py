@@ -1,8 +1,8 @@
 import numpy as np
 import gymnasium as gym
-from envs.wrappers.time_limit import TimeLimit
+from boom.envs.wrappers.time_limit import TimeLimit
 
-from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
+import metaworld
 
 
 class MetaWorldWrapper(gym.Wrapper):
@@ -15,7 +15,8 @@ class MetaWorldWrapper(gym.Wrapper):
         self.env._freeze_rand_vec = False
 
     def reset(self, **kwargs):
-        obs = super().reset(**kwargs).astype(np.float32)
+        obs, _ = super().reset(**kwargs)
+        obs = obs.astype(np.float32)
         self.env.step(np.zeros(self.env.action_space.shape))
         return obs
 
@@ -41,14 +42,22 @@ def make_env(cfg):
     """
     Make Meta-World environment.
     """
-    env_id = cfg.task.split("-", 1)[-1] + "-v2-goal-observable"
-    if (
-        not cfg.task.startswith("mw-")
-        or env_id not in ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
-    ):
-        raise ValueError("Unknown task:", cfg.task)
+    # Convert task name from mw-button-press to button-press-v3
+    task_name = cfg.task.split("-", 1)[-1] if "-" in cfg.task else cfg.task
+    env_id = f"{task_name}-v3"
+
+    if not cfg.task.startswith("mw-"):
+        raise ValueError("MetaWorld tasks must start with 'mw-'")
+
+    # Check if environment exists in ML1
+    if env_id not in metaworld.ML1.ENV_NAMES:
+        raise ValueError(f"Unknown task: {cfg.task}. Available tasks: {metaworld.ML1.ENV_NAMES}")
+
     assert cfg.obs == "state", "This task only supports state observations."
-    env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_id](seed=cfg.seed)
+
+    # Create ML1 benchmark and environment
+    benchmark = metaworld.ML1(env_id)
+    env = benchmark.train_classes[env_id]()
     env = MetaWorldWrapper(env, cfg)
     env = TimeLimit(env, max_episode_steps=100)
     env.max_episode_steps = env._max_episode_steps
