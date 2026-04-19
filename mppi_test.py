@@ -733,26 +733,26 @@ Examples:
     # Part 1: PI/Flow Ablation Study (4 configurations)
     # =====================================================
     # Comment out the next line to skip this part
-    # run_flow_pi_ablation(
-    #     model_path=args.model,
-    #     config_path=args.config,
-    #     task_name=args.task,
-    #     num_episodes=args.episodes,
-    #     results_dir=results_dir
-    # )
+    run_flow_pi_ablation(
+        model_path=args.model,
+        config_path=args.config,
+        task_name=args.task,
+        num_episodes=args.episodes,
+        results_dir=results_dir
+    )
 
     # =====================================================
     # Part 2: Flow Trajectories Ablation Study (9 configurations)
     # =====================================================
     # Comment out the next line to skip this part
-    run_flow_trajs_ablation(
-        model_path=args.model,
-        config_path=args.config,
-        task_name=args.task,
-        num_episodes=args.episodes,
-        results_dir=results_dir,
-        num_points=9
-    )
+    # run_flow_trajs_ablation(
+    #     model_path=args.model,
+    #     config_path=args.config,
+    #     task_name=args.task,
+    #     num_episodes=args.episodes,
+    #     results_dir=results_dir,
+    #     num_points=9
+    # )
 
     print("\n" + "="*60)
     print("All experiments completed successfully!")

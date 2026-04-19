@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 from omegaconf import OmegaConf
 from boom.envs import make_env
 from boom.boom_alg import BOOM
-from boom.trainer.online_trainer import OnlineTrainer
+from online_trainer import OnlineTrainer
 from boom.common.buffer import Buffer
 from boom.common.logger import Logger
 
@@ -34,7 +34,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
         # Environment parameters
         'step_size': 0.40,
         'goal_radius': 0.1,
-        'max_steps': 40,
+        'max_steps': 20,
         'step_penalty': -0.01,
 
         # Training parameters
@@ -55,7 +55,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
         # MPPI planning parameters
         'mpc': True,
-        'iterations': 20,
+        'iterations': 10,
         'num_samples': 512,
         'num_elites': 32,
         'num_pi_trajs': 24,
@@ -94,11 +94,12 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
         # Experiment setup
         'seed': seed,
+        'seed_steps': 100,
         'multitask': False,
 
         # Evaluation
         'eval_episodes': 10,
-        'eval_freq': 1000,
+        'eval_freq': 100,
         'eval_pi': False,
         'eval_value': False,
         'eval_flow': (policy_type == 'flow'),
@@ -147,14 +148,11 @@ def main():
                         help='Number of training steps')
     parser.add_argument('--seed', type=int, default=1,
                         help='Random seed')
-    parser.add_argument('--eval_freq', type=int, default=500,
-                        help='Evaluation frequency')
 
     args = parser.parse_args()
 
     # Get config
     cfg = get_config(policy_type=args.policy_type, seed=args.seed, steps=args.steps)
-    cfg.eval_freq = args.eval_freq
 
     # Print config
     print("=" * 70)
