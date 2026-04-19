@@ -62,7 +62,7 @@ max_std: 2
 temperature: 0.5
 
 # flow
-flow_q_coef: 1.0
+flow_q_coef: 0.0
 flow_weight_max: 1.0  # max weight for Q-based weighting
 flow_weight_min: 0.001   # min weight for Q-based weighting
 
