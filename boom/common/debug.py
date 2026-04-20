@@ -6,7 +6,7 @@ import numpy as np
 
 
 def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
-                    num_pi=0, num_flow=0, num_random=None):
+                    num_pi=0, num_pi_derived=0, num_flow=0, num_flow_derived=0, num_random=None):
     """
     Plot MPPI action distributions with value overlay.
 
@@ -18,7 +18,9 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
         iter_idx: current iteration index
         mppi_debug_dir: directory to save debug plots
         num_pi: number of pi-guided trajectories
+        num_pi_derived: number of pi-derived trajectories
         num_flow: number of flow-guided trajectories
+        num_flow_derived: number of flow-derived trajectories
         num_random: number of random trajectories (None to auto-detect)
     """
     if mppi_debug_dir is None:
@@ -34,12 +36,16 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
 
     # Auto-detect num_random if not provided
     if num_random is None:
-        num_random = num_samples - num_pi - num_flow
+        num_random = num_samples - num_pi - num_pi_derived - num_flow - num_flow_derived
 
     # Create indices for different trajectory types
+    # Layout: [pi_base | pi_derived | flow_base | flow_derived | random]
     pi_indices = slice(0, num_pi) if num_pi > 0 else None
-    flow_indices = slice(num_pi, num_pi + num_flow) if num_flow > 0 else None
-    random_indices = slice(num_pi + num_flow, num_samples) if num_random > 0 else None
+    pi_derived_indices = slice(num_pi, num_pi + num_pi_derived) if num_pi_derived > 0 else None
+    flow_indices = slice(num_pi + num_pi_derived, num_pi + num_pi_derived + num_flow) if num_flow > 0 else None
+    flow_derived_indices = slice(num_pi + num_pi_derived + num_flow,
+                                num_pi + num_pi_derived + num_flow + num_flow_derived) if num_flow_derived > 0 else None
+    random_indices = slice(num_pi + num_pi_derived + num_flow + num_flow_derived, num_samples) if num_random > 0 else None
 
     # Create directory for action distribution plots
     act_dir = os.path.join(mppi_debug_dir, 'act')
@@ -68,10 +74,20 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
                 ax.hist(pi_actions, bins=50, alpha=0.5, color='#9467bd', edgecolor='black',
                        label=f'Pi (n={num_pi})' if t == 0 else '')
 
+            if pi_derived_indices is not None:
+                pi_derived_actions = actions_np[t, pi_derived_indices, dim]
+                ax.hist(pi_derived_actions, bins=50, alpha=0.5, color='#d62728', edgecolor='black',
+                       label=f'Pi-derived (n={num_pi_derived})' if t == 0 else '')
+
             if flow_indices is not None:
                 flow_actions = actions_np[t, flow_indices, dim]
                 ax.hist(flow_actions, bins=50, alpha=0.5, color='#1f77b4', edgecolor='black',
                        label=f'Flow (n={num_flow})' if t == 0 else '')
+
+            if flow_derived_indices is not None:
+                flow_derived_actions = actions_np[t, flow_derived_indices, dim]
+                ax.hist(flow_derived_actions, bins=50, alpha=0.5, color='#ff7f0e', edgecolor='black',
+                       label=f'Flow-derived (n={num_flow_derived})' if t == 0 else '')
 
             if random_indices is not None:
                 random_actions = actions_np[t, random_indices, dim]
@@ -97,6 +113,14 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
                             color='#9467bd', alpha=0.8, linewidth=1, markersize=3,
                             label='Pi Value' if num_pi > 0 else '')
 
+                if pi_derived_indices is not None:
+                    pi_derived_actions = actions_np[t, pi_derived_indices, dim]
+                    pi_derived_values = values_np[pi_derived_indices]
+                    sort_idx = np.argsort(pi_derived_actions)
+                    ax2.plot(pi_derived_actions[sort_idx], pi_derived_values[sort_idx], 'o-',
+                            color='#d62728', alpha=0.8, linewidth=1, markersize=3,
+                            label='Pi-derived Value' if num_pi_derived > 0 else '')
+
                 if flow_indices is not None:
                     flow_actions = actions_np[t, flow_indices, dim]
                     flow_values = values_np[flow_indices]
@@ -104,6 +128,14 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
                     ax2.plot(flow_actions[sort_idx], flow_values[sort_idx], 'o-',
                             color='#1f77b4', alpha=0.8, linewidth=1, markersize=3,
                             label='Flow Value' if num_flow > 0 else '')
+
+                if flow_derived_indices is not None:
+                    flow_derived_actions = actions_np[t, flow_derived_indices, dim]
+                    flow_derived_values = values_np[flow_derived_indices]
+                    sort_idx = np.argsort(flow_derived_actions)
+                    ax2.plot(flow_derived_actions[sort_idx], flow_derived_values[sort_idx], 'o-',
+                            color='#ff7f0e', alpha=0.8, linewidth=1, markersize=3,
+                            label='Flow-derived Value' if num_flow_derived > 0 else '')
 
                 if random_indices is not None:
                     random_actions = actions_np[t, random_indices, dim]
@@ -352,65 +384,97 @@ def _process_real_trajectories(trajectories):
 
 def _process_mppi_trajectories(mppi_trajs, step_size):
     """Simulate MPPI trajectories from action sequences.
-    
+
     Args:
-        mppi_trajs: List of dicts with pi/flow/random actions and values
+        mppi_trajs: List of dicts with pi/flow/random actions and values (including derived)
         step_size: Step size for simulation
-        
+
     Returns:
         List of tuples: (positions_array, traj_type, value)
     """
     processed = []
-    
+
     for init_info in mppi_trajs:
         # Process pi trajectories
         if init_info.get('pi_actions') is not None and init_info.get('num_pi', 0) > 0:
             pi_actions = init_info['pi_actions'] * np.pi  # [H, num_pi, A]
             num_pi = init_info['num_pi']
             pi_values = init_info.get('pi_values')
-            
+
             if pi_values is not None:
                 pi_values_np = pi_values.cpu().numpy() if hasattr(pi_values, 'cpu') else pi_values
             else:
                 pi_values_np = None
-            
+
             for traj_idx in range(num_pi):
                 positions = _simulate_from_actions(pi_actions[:, traj_idx, :], step_size)
                 value = pi_values_np[traj_idx] if pi_values_np is not None else None
                 processed.append((positions, 'pi', value))
-        
+
+        # Process pi-derived trajectories
+        if init_info.get('pi_derived_actions') is not None and init_info.get('num_pi_derived', 0) > 0:
+            pi_derived_actions = init_info['pi_derived_actions'] * np.pi  # [H, num_pi_derived, A]
+            num_pi_derived = init_info['num_pi_derived']
+            pi_derived_values = init_info.get('pi_derived_values')
+
+            if pi_derived_values is not None:
+                pi_derived_values_np = pi_derived_values.cpu().numpy() if hasattr(pi_derived_values, 'cpu') else pi_derived_values
+            else:
+                pi_derived_values_np = None
+
+            for traj_idx in range(num_pi_derived):
+                positions = _simulate_from_actions(pi_derived_actions[:, traj_idx, :], step_size)
+                value = pi_derived_values_np[traj_idx] if pi_derived_values_np is not None else None
+                processed.append((positions, 'pi_derived', value))
+
         # Process flow trajectories
         if init_info.get('flow_actions') is not None and init_info.get('num_flow', 0) > 0:
             flow_actions = init_info['flow_actions'] * np.pi  # [H, num_flow, A]
             num_flow = init_info['num_flow']
             flow_values = init_info.get('flow_values')
-            
+
             if flow_values is not None:
                 flow_values_np = flow_values.cpu().numpy() if hasattr(flow_values, 'cpu') else flow_values
             else:
                 flow_values_np = None
-            
+
             for traj_idx in range(num_flow):
                 positions = _simulate_from_actions(flow_actions[:, traj_idx, :], step_size)
                 value = flow_values_np[traj_idx] if flow_values_np is not None else None
                 processed.append((positions, 'flow', value))
-        
+
+        # Process flow-derived trajectories
+        if init_info.get('flow_derived_actions') is not None and init_info.get('num_flow_derived', 0) > 0:
+            flow_derived_actions = init_info['flow_derived_actions'] * np.pi  # [H, num_flow_derived, A]
+            num_flow_derived = init_info['num_flow_derived']
+            flow_derived_values = init_info.get('flow_derived_values')
+
+            if flow_derived_values is not None:
+                flow_derived_values_np = flow_derived_values.cpu().numpy() if hasattr(flow_derived_values, 'cpu') else flow_derived_values
+            else:
+                flow_derived_values_np = None
+
+            for traj_idx in range(num_flow_derived):
+                positions = _simulate_from_actions(flow_derived_actions[:, traj_idx, :], step_size)
+                value = flow_derived_values_np[traj_idx] if flow_derived_values_np is not None else None
+                processed.append((positions, 'flow_derived', value))
+
         # Process random trajectories
         if init_info.get('random_actions') is not None and init_info.get('num_random', 0) > 0:
             random_actions = init_info['random_actions'] * np.pi  # [H, num_random, A]
             num_random = min(init_info['num_random'], 100)  # Limit for clarity
             random_values = init_info.get('random_values')
-            
+
             if random_values is not None:
                 random_values_np = random_values.cpu().numpy() if hasattr(random_values, 'cpu') else random_values
             else:
                 random_values_np = None
-            
+
             for traj_idx in range(num_random):
                 positions = _simulate_from_actions(random_actions[:, traj_idx, :], step_size)
                 value = random_values_np[traj_idx] if random_values_np is not None else None
                 processed.append((positions, 'random', value))
-    
+
     return processed
 
 
@@ -570,7 +634,17 @@ def _plot_trajectories_on_axis(ax, processed, norm, cmap, use_value_cmap, traj_t
     for positions, traj_type_label, value in processed:
         # Determine color and line style
         if use_value_cmap and norm is not None and cmap is not None and value is not None:
-            color = cmap(norm(value))
+            # Only use value-based colormap for non-derived trajectories
+            if traj_type_label not in ['pi_derived', 'flow_derived']:
+                color = cmap(norm(value))
+            else:
+                # Use fixed colors for derived trajectories (not value-based)
+                if traj_type_label == 'pi_derived':
+                    color = '#d62728'  # red (distinct from pi purple)
+                elif traj_type_label == 'flow_derived':
+                    color = '#ff7f0e'  # orange (distinct from flow blue)
+                else:
+                    color = 'gray'
         elif traj_type == 'real':
             # Use goal-based colors for real trajectories
             if traj_type_label in GOAL_CONFIG:
@@ -581,8 +655,12 @@ def _plot_trajectories_on_axis(ax, processed, norm, cmap, use_value_cmap, traj_t
             # Default colors for MPPI trajectories without values
             if traj_type_label == 'pi':
                 color = '#9467bd'  # purple
+            elif traj_type_label == 'pi_derived':
+                color = '#d62728'  # red (distinct from pi purple)
             elif traj_type_label == 'flow':
                 color = '#1f77b4'  # blue
+            elif traj_type_label == 'flow_derived':
+                color = '#ff7f0e'  # orange (distinct from flow blue)
             else:  # random
                 color = '#7f7f7f'  # gray
 
@@ -590,7 +668,11 @@ def _plot_trajectories_on_axis(ax, processed, norm, cmap, use_value_cmap, traj_t
         if traj_type == 'mppi':
             if traj_type_label == 'flow':
                 line_style = '-'
+            elif traj_type_label == 'flow_derived':
+                line_style = '-'
             elif traj_type_label == 'pi':
+                line_style = '--'
+            elif traj_type_label == 'pi_derived':
                 line_style = '--'
             else:  # random
                 line_style = ':'
@@ -616,8 +698,12 @@ def _plot_trajectories_on_axis(ax, processed, norm, cmap, use_value_cmap, traj_t
             if traj_type == 'mppi':
                 if traj_type_label == 'flow':
                     label = 'Flow trajectories'
+                elif traj_type_label == 'flow_derived':
+                    label = 'Flow-derived trajectories'
                 elif traj_type_label == 'pi':
                     label = 'Pi trajectories'
+                elif traj_type_label == 'pi_derived':
+                    label = 'Pi-derived trajectories'
                 else:
                     label = 'Random trajectories'
             elif traj_type == 'real':
