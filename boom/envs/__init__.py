@@ -102,5 +102,6 @@ def make_env(cfg):
         cfg.episode_length = env.spec.max_episode_steps
     else:
         cfg.episode_length = env.max_episode_steps
-    cfg.seed_steps = max(1000, 5 * cfg.episode_length)
+    # cfg.seed_steps = max(1000, 5 * cfg.episode_length)
+    # cfg.seed_steps = 100
     return env
