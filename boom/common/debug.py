@@ -49,6 +49,7 @@ def plot_mppi_debug(actions, values, mean, std, iter_idx, mppi_debug_dir,
     # ========== Plot: Action Distributions for All Timesteps ==========
     # Create subplots: action_dim rows, horizon columns
     fig, axes = plt.subplots(action_dim, horizon, figsize=(4*horizon, 4*action_dim))
+    # fig, axes = plt.subplots(horizon, action_dim, figsize=(4*action_dim, 4*horizon))
     if action_dim == 1:
         axes = axes.reshape(1, -1)  # Ensure 2D array
     if horizon == 1:
