@@ -8,9 +8,9 @@ set -euo pipefail
 # MyoSuite tasks
 # declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-hold-hard")
 declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard")
-declare -a MYOSUITE_TASKS=("myo-obj-hold" "myo-obj-hold-hard")
-declare -a MYOSUITE_TASKS=("myo-pose" "myo-pose-hard" "myo-key-turn")
-declare -a MYOSUITE_TASKS=("myo-pen-twirl" "myo-pen-twirl-hard" "myo-key-turn-hard")
+# declare -a MYOSUITE_TASKS=("myo-obj-hold" "myo-obj-hold-hard")
+# declare -a MYOSUITE_TASKS=("myo-pose" "myo-pose-hard" "myo-key-turn")
+# declare -a MYOSUITE_TASKS=("myo-pen-twirl" "myo-pen-twirl-hard" "myo-key-turn-hard")
 
 # declare -a MYOSUITE_TASKS=("myo-reach" "myo-reach-hard" "myo-obj-hold" "myo-obj-hold-hard" "myo-pose" "myo-pose-hard" "myo-pen-twirl" "myo-pen-twirl-hard" "myo-key-turn" "myo-key-turn-hard")
 
