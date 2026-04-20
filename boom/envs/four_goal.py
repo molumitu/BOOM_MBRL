@@ -8,7 +8,7 @@ Environment Design:
 - State space: 2D position (x, y) in [-1, 1] x [-1, 1]
 - Action space: Direction angle theta in [-pi, pi] with fixed step size
 - Goals: Four goals at corners: (-1, 1), (1, 1), (-1, -1), (1, -1), all with radius 0.1
-- Reward: +50 for reaching any goal, step_penalty - distance_to_closest_goal per step
+- Reward: +10 for reaching any goal, step_penalty - distance_to_closest_goal per step
 - Termination: Reach goal or exceed max_steps
 
 Purpose: Demonstrate that unimodal Gaussian policies struggle with multi-modal
@@ -106,6 +106,9 @@ class FourGoalNavigationEnv(gym.Env):
         # Set seed
         if seed is not None:
             self.reset_seed(seed)
+        else:
+            # Initialize random number generator if no seed provided
+            self.np_random = np.random.RandomState()
 
     def reset_seed(self, seed: int) -> None:
         """Set random seed for reproducibility."""
@@ -131,7 +134,7 @@ class FourGoalNavigationEnv(gym.Env):
             self.reset_seed(seed)
 
         # Reset to center
-        self.agent_pos = np.array([0.0, 0.0], dtype=np.float32)
+        self.agent_pos = self.np_random.uniform(-0.05, 0.05, size=2).astype(np.float32)
         self.current_step = 0
         self.trajectory = [self.agent_pos.copy()]
         self.terminated = False
@@ -193,8 +196,8 @@ class FourGoalNavigationEnv(gym.Env):
         for goal_name, goal_pos in self.goals.items():
             dist = np.linalg.norm(self.agent_pos - goal_pos)
             if dist < self.goal_radius:
-                # Reached goal: give +50 reward
-                reward = 50.0
+                # Reached goal: give +10 reward
+                reward = 10.0
                 reached_goal = True
                 reached_which = goal_name
                 self.terminated = True
@@ -454,7 +457,7 @@ def plot_reward_landscape(env, save_path):
 
             # Compute reward based on current reward calculation
             if min_dist < env.goal_radius:
-                rewards[i, j] = 50.0  # Reached goal
+                rewards[i, j] = 10.0  # Reached goal
             else:
                 rewards[i, j] = env.step_penalty - min_dist  # Step penalty + distance penalty
 
@@ -520,7 +523,7 @@ def plot_reward_landscape(env, save_path):
     stats_text = (f"Grid Resolution: {grid_resolution}x{grid_resolution}\n"
                  f"Reward Range: [{rewards.min():.2f}, {rewards.max():.2f}]\n"
                  f"Step Penalty: {env.step_penalty}\n"
-                 f"Goal Reward: {50.0}")
+                 f"Goal Reward: {10.0}")
     ax.text(-1.05, -1.05, stats_text, fontsize=9, ha='left', va='bottom',
            bbox=dict(boxstyle='round,pad=0.5', facecolor='white',
                     edgecolor='gray', alpha=0.9), zorder=6)
