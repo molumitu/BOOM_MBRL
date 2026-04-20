@@ -5,6 +5,8 @@ import torch
 from tqdm import trange
 from tensordict.tensordict import TensorDict
 from boom.trainer.base import Trainer
+import matplotlib.pyplot as plt
+import os
 
 
 class OnlineTrainer(Trainer):
@@ -189,6 +191,52 @@ class OnlineTrainer(Trainer):
             q_value=np.nanmean(q_values),
         )
 
+    def plot_action_reward_distribution(self, replay_action, replay_reward, step):
+        """Plot action-reward distribution as scatter plots.
+
+        Args:
+            replay_action: Tensor of shape [T, B, D] where T is time steps, B is batch size, D is action dim
+            replay_reward: Tensor of shape [T, B, 1]
+            step: Current training step for filename
+        """
+        # Convert to numpy if needed
+        if torch.is_tensor(replay_action):
+            replay_action = replay_action.detach().cpu().numpy()
+        if torch.is_tensor(replay_reward):
+            replay_reward = replay_reward.detach().cpu().numpy()
+
+        T, B, D = replay_action.shape
+
+        # Create figure with T columns and D rows
+        fig, axes = plt.subplots(D, T, figsize=(4 * T, 3 * D), squeeze=False)
+
+        # Plot scatter plots for each timestep and action dimension
+        for t in range(T):
+            for d in range(D):
+                ax = axes[d, t]
+                # Extract action values for dimension d across all batches
+                action_values = replay_action[t, :, d]  # Shape: [B]
+                reward_values = replay_reward[:, 0]  # Shape: [B]
+
+                # Create scatter plot
+                ax.scatter(action_values, reward_values, alpha=0.5, s=20)
+                ax.set_xlabel(f'Action')
+                ax.set_ylabel('Reward')
+                ax.set_title(f'Timestep {t}, Action dim {d}')
+                ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        # Save figure
+        save_dir = os.path.join(self.cfg.work_dir, 'action_reward_plots')
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f'action_reward_dist_step_{step}.png')
+        print(f"Buffer plot saved to {save_path}")
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
+        print(f"Action-reward distribution plot saved to {save_path}")
+
     def to_td(self, obs, action=None, mu=None, std=None, reward=None):
         """Creates a TensorDict for a new episode."""
         obs = TensorDict(obs, batch_size=(), device="cpu") if isinstance(obs, dict) else obs.unsqueeze(0).cpu()
@@ -231,6 +279,37 @@ class OnlineTrainer(Trainer):
                         eval_metrics.update(self.eval_value())
                     eval_metrics.update(self.common_metrics())
                     self.logger.log(eval_metrics, "eval")
+
+                    # Plot action-reward distribution from replay buffer
+                    if self._step > self.cfg.seed_steps:
+                        # Sample a batch from replay buffer and estimate values
+                        replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task = self.buffer.sample()
+
+                        # Stack into tensors if they are lists
+                        if isinstance(replay_obs, list):
+                            replay_obs = torch.stack(replay_obs)
+                        if isinstance(replay_action, list):
+                            replay_action = torch.stack(replay_action)
+
+                        # Encode observations to latent space
+                        device = self.agent.device
+                        replay_z = self.agent.model.encode(replay_obs[0].to(device), None)
+
+                        # Estimate values using the model
+                        horizon = getattr(self.agent.cfg, 'horizon', 1)  # Get horizon from config, default to 1
+                        replay_reward_estimated = self.agent._estimate_value(
+                            replay_z,
+                            replay_action.to(device),
+                            None,
+                            horizon
+                        )
+
+                        self.plot_action_reward_distribution(
+                            replay_action,
+                            replay_reward_estimated,
+                            self._step
+                        )
+
                     eval_next = False
       
                 if self._step > 0:

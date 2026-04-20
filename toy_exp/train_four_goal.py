@@ -44,7 +44,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
         'value_coef': 0.1,
         'consistency_coef': 20,
         'rho': 0.5,
-        'lr': 3e-4,
+        'lr': 1e-3,
         'enc_lr_scale': 0.3,
         'grad_clip_norm': 20,
         'tau': 0.01,
@@ -62,7 +62,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
         'num_flow_trajs': 48 if policy_type == 'flow' else 0,
         'horizon': 3,
         'min_std': 0.05,
-        'max_std': 1.0,
+        'max_std': 0.5,
         'temperature': 10,
 
         # Flow-specific parameters
