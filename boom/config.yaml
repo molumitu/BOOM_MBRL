@@ -101,7 +101,7 @@ save_csv: true
 # misc
 save_video: false
 save_agent: true
-save_freq: 100000
+save_freq: 500000
 seed: 1
 
 # convenience
