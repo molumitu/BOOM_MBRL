@@ -17,13 +17,13 @@ warnings.filterwarnings("ignore")
 
 from omegaconf import OmegaConf
 from boom.envs import make_env
-from boom.boom_alg import BOOM
+from flow_alg import BOOM
 from online_trainer import OnlineTrainer
 from boom.common.buffer import Buffer
 from boom.common.logger import Logger
 
 
-def get_config(policy_type='mlp', seed=1, steps=10_000):
+def get_config(policy_type='mlp', seed=1, steps=10_000, extra=''):
     """Get training configuration as OmegaConf."""
     cfg = {
         # Task and environment
@@ -55,9 +55,9 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
         # MPPI planning parameters
         'mpc': True,
-        'iterations': 10,
+        'iterations': 6,
         'num_samples': 512,
-        'num_elites': 32,
+        'num_elites': 64,
         'num_pi_trajs': 24,
         'num_flow_trajs': 48 if policy_type == 'flow' else 0,
         'horizon': 3,
@@ -109,7 +109,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
         # Logging
         'exp_name': f'four_goal_{policy_type}_seed{seed}',
-        'extra': '',
+        'extra': extra,
         'wandb_project': 'four-goal-navigation',
         'wandb_entity': 'shallowdream0745-thu',
         'wandb_silent': False,
@@ -121,7 +121,7 @@ def get_config(policy_type='mlp', seed=1, steps=10_000):
 
     # Set working directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    work_dir = project_root / 'toy_exp' / 'results' / cfg['exp_name'] / timestamp
+    work_dir = project_root / 'toy_exp' / 'results' / cfg['exp_name'] / (timestamp + extra)
     os.makedirs(work_dir, exist_ok=True)
     cfg['work_dir'] = work_dir  # Keep as Path object
     cfg['data_dir'] = work_dir
@@ -141,18 +141,19 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='Train four-goal navigation with BOOM')
-    parser.add_argument('--policy_type', type=str, default='mlp',
+    parser.add_argument('--policy_type', type=str, default='flow',
                         choices=['mlp', 'flow'],
                         help='Policy type')
     parser.add_argument('--steps', type=int, default=10000,
                         help='Number of training steps')
     parser.add_argument('--seed', type=int, default=1,
                         help='Random seed')
+    parser.add_argument('--extra', type=str, default='')
 
     args = parser.parse_args()
 
     # Get config
-    cfg = get_config(policy_type=args.policy_type, seed=args.seed, steps=args.steps)
+    cfg = get_config(policy_type=args.policy_type, seed=args.seed, steps=args.steps, extra=args.extra)
 
     # Print config
     print("=" * 70)

@@ -7,6 +7,7 @@ from tensordict.tensordict import TensorDict
 from boom.trainer.base import Trainer
 import matplotlib.pyplot as plt
 import os
+from toy_exp.eval_plot_utils import plot_mppi_2x2, plot_final_trajectories, plot_buffer_stats
 
 
 class OnlineTrainer(Trainer):
@@ -39,61 +40,40 @@ class OnlineTrainer(Trainer):
 
     @torch.no_grad()
     def eval(self):
+        """
+        Evaluation function with standardized plotting.
+        Creates eval/step_{}/ folder with:
+        - pi_mppi.png: 2x2 grid of PI-MPPI visualization
+        - flow_mppi.png: 2x2 grid of Flow-MPPI visualization
+        - buffer_stat.png: Action-reward distribution from buffer
+        """
         ep_rewards, ep_successes = [], []
-        # Check if environment has plot methods
-        has_mppi_plot = hasattr(self.env, 'plot_mppi_init_trajs')
-        has_traj_plot = hasattr(self.env, 'plot_trajectories')
-        mppi_debug_data = [] if has_mppi_plot else None
-        real_trajectories = [] if has_traj_plot else None
+        mppi_debug_data = []  # Collect MPPI debug info from first episode
+        real_trajectories = []  # Collect real trajectories from all episodes
 
+        # Run evaluation episodes
         for i in trange(self.cfg.eval_episodes):
             obs, done, ep_reward, t = self.env.reset()[0], False, 0, 0
-            episode_debug_data = None
+            trajectory = []
 
-            # Collect real trajectory data
-            if has_traj_plot:
-                trajectory = []
-                if hasattr(self.env, '_env'):
-                    # Access wrapped env to get agent position
-                    trajectory.append(self.env._env.agent_pos.copy())
-                elif hasattr(self.env, 'agent_pos'):
-                    trajectory.append(self.env.agent_pos.copy())
+            # Get initial position
+            if hasattr(self.env, '_env'):
+                trajectory.append(self.env._env.agent_pos.copy())
+            elif hasattr(self.env, 'agent_pos'):
+                trajectory.append(self.env.agent_pos.copy())
 
             if self.cfg.save_video:
                 self.logger.video.init(self.env, enabled=(i == 0))
+
             while not done:
-                # Use debug=True to get MPPI trajectory information
-                result = self.agent.act(obs, t0=(t == 0), eval_mode=True, debug=has_traj_plot)
+                # Get debug info only for first episode, first timestep
+                need_debug = (i == 0 and t == 0)
+                result = self.agent.act(obs, t0=(t == 0), eval_mode=True, debug=need_debug)
 
-                if has_traj_plot:
+                if need_debug:
                     action, _, _, debug_info = result
-                    # Save debug info for first timestep of episode
-                    if episode_debug_data is None and debug_info:
-                        # Extract pi and flow actions
-                        pi_actions = debug_info.get('pi_actions')  # [H, num_pi, A]
-                        num_pi = debug_info.get('num_pi', 0)
-                        flow_actions = debug_info.get('flow_actions')  # [H, num_flow, A]
-                        num_flow = debug_info.get('num_flow', 0)
-
-                        # Extract initial random actions (saved separately in debug mode)
-                        random_actions = debug_info.get('init_random_actions')  # [H, num_random, A]
-
-                        # Extract trajectory values
-                        pi_values = debug_info.get('pi_values')  # [num_pi]
-                        flow_values = debug_info.get('flow_values')  # [num_flow]
-                        random_values = debug_info.get('random_values')  # [num_random]
-
-                        episode_debug_data = {
-                            'pi_actions': pi_actions,
-                            'num_pi': num_pi,
-                            'flow_actions': flow_actions,
-                            'num_flow': num_flow,
-                            'random_actions': random_actions,
-                            'num_random': random_actions.shape[1] if random_actions is not None else 0,
-                            'pi_values': pi_values,
-                            'flow_values': flow_values,
-                            'random_values': random_values,
-                        }
+                    if debug_info:
+                        mppi_debug_data.append(debug_info)
                 else:
                     action, _, _ = result
 
@@ -103,44 +83,57 @@ class OnlineTrainer(Trainer):
                 t += 1
 
                 # Record trajectory
-                if has_traj_plot:
-                    if hasattr(self.env, '_env'):
-                        trajectory.append(self.env._env.agent_pos.copy())
-                    elif hasattr(self.env, 'agent_pos'):
-                        trajectory.append(self.env.agent_pos.copy())
+                if hasattr(self.env, '_env'):
+                    trajectory.append(self.env._env.agent_pos.copy())
+                elif hasattr(self.env, 'agent_pos'):
+                    trajectory.append(self.env.agent_pos.copy())
 
                 if self.cfg.save_video:
                     self.logger.video.record(self.env)
+
             ep_rewards.append(ep_reward)
             ep_successes.append(info["success"])
+
+            # Save trajectory data
+            real_trajectories.append({
+                'trajectory': trajectory,
+                'reached_goal': info.get('reached_which', None),
+                'reward': ep_reward
+            })
+
             if self.cfg.save_video:
                 self.logger.video.save(self._step, key='results/video')
 
-            if has_mppi_plot and episode_debug_data is not None:
-                mppi_debug_data.append(episode_debug_data)
+        # Create standardized evaluation plots
+        eval_save_dir = os.path.join(self.cfg.work_dir, 'eval', f'step_{self._step}')
+        os.makedirs(eval_save_dir, exist_ok=True)
 
-            # Save real trajectory data
-            if has_traj_plot:
-                real_trajectories.append({
-                    'trajectory': trajectory,
-                    'reached_goal': info.get('reached_which', None),
-                    'reward': ep_reward
-                })
+        # Plot final trajectories
+        final_trajs_path = os.path.join(eval_save_dir, 'final_trajectories.png')
+        plot_final_trajectories(real_trajectories, self.env, final_trajs_path)
 
-        # Plot MPPI trajectories if available
-        if has_mppi_plot and mppi_debug_data and len(mppi_debug_data) > 0:
-            import os
-            save_dir = os.path.join(self.cfg.work_dir, 'trajectory_plots')
-            os.makedirs(save_dir, exist_ok=True)
-            self.env.plot_mppi_init_trajs(mppi_debug_data, self._step, save_dir)
+        # Plot MPPI debug figures
+        if mppi_debug_data and len(mppi_debug_data) > 0:
+            debug_info = mppi_debug_data[0]  # Use first episode data
 
-        # Plot real trajectories if available
-        if has_traj_plot and real_trajectories and len(real_trajectories) > 0:
-            import os
-            save_dir = os.path.join(self.cfg.work_dir, 'trajectory_plots')
-            os.makedirs(save_dir, exist_ok=True)
-            self.env.plot_trajectories(real_trajectories, self._step, save_dir)
+            # Get environment parameters
+            step_size = getattr(self.env, 'step_size', 0.1)
+            goal_radius = getattr(self.env, 'goal_radius', 0.1)
 
+            try:
+                # Plot combined figure and action distribution
+                from toy_exp.eval_plot_utils import _plot_combined_mppi_figure, _plot_action_distribution
+                _plot_combined_mppi_figure(debug_info, self.env, eval_save_dir, step_size, goal_radius)
+                _plot_action_distribution(debug_info, self.env, eval_save_dir)
+            except Exception as e:
+                print(f"Error plotting MPPI: {e}")
+                import traceback
+                traceback.print_exc()
+
+        print(f"Evaluation plots saved to {eval_save_dir}")
+
+
+        # Evaluate PI policy if enabled
         if self.cfg.eval_pi:
             ep_rewards_pi, ep_successes_pi = [], []
             for i in range(self.cfg.eval_episodes):
@@ -280,7 +273,7 @@ class OnlineTrainer(Trainer):
                     eval_metrics.update(self.common_metrics())
                     self.logger.log(eval_metrics, "eval")
 
-                    # Plot action-reward distribution from replay buffer
+                    # Plot buffer statistics
                     if self._step > self.cfg.seed_steps:
                         # Sample a batch from replay buffer and estimate values
                         replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task = self.buffer.sample()
@@ -296,7 +289,7 @@ class OnlineTrainer(Trainer):
                         replay_z = self.agent.model.encode(replay_obs[0].to(device), None)
 
                         # Estimate values using the model
-                        horizon = getattr(self.agent.cfg, 'horizon', 1)  # Get horizon from config, default to 1
+                        horizon = getattr(self.agent.cfg, 'horizon', 1)
                         replay_reward_estimated = self.agent._estimate_value(
                             replay_z,
                             replay_action.to(device),
@@ -304,10 +297,13 @@ class OnlineTrainer(Trainer):
                             horizon
                         )
 
-                        self.plot_action_reward_distribution(
+                        # Plot buffer statistics
+                        eval_save_dir = os.path.join(self.cfg.work_dir, 'eval', f'step_{self._step}')
+                        plot_buffer_stats(
                             replay_action,
                             replay_reward_estimated,
-                            self._step
+                            self._step,
+                            eval_save_dir
                         )
 
                     eval_next = False
