@@ -392,6 +392,11 @@ class BOOM:
 						iter_debug['init_actions'] = actions.cpu().clone()  # [H, num_samples, A]
 						iter_debug['init_values'] = value.squeeze(1).cpu().clone()  # [num_samples]
 
+					# Save final iteration samples for visualization
+					if iter_idx == mppi_iterations - 1:
+						iter_debug['final_actions'] = actions.cpu().clone()  # [H, num_samples, A]
+						iter_debug['final_values'] = value.squeeze(1).cpu().clone()  # [num_samples]
+
 					debug_info['refinements'][k].append(iter_debug)
 
 			# Select best action from final iteration (sample from elite set)

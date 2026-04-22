@@ -7,7 +7,7 @@ from tensordict.tensordict import TensorDict
 from boom.trainer.base import Trainer
 import matplotlib.pyplot as plt
 import os
-from toy_exp.eval_plot_utils import plot_mppi_2x2, plot_final_trajectories, plot_buffer_stats
+from toy_exp.eval_plot_utils import plot_final_trajectories, plot_buffer_stats
 
 
 class OnlineTrainer(Trainer):
@@ -122,9 +122,9 @@ class OnlineTrainer(Trainer):
 
             try:
                 # Plot combined figure and action distribution
-                from toy_exp.eval_plot_utils import _plot_combined_mppi_figure, _plot_action_distribution
-                _plot_combined_mppi_figure(debug_info, self.env, eval_save_dir, step_size, goal_radius)
-                _plot_action_distribution(debug_info, self.env, eval_save_dir)
+                from toy_exp.eval_plot_utils import plot_combined_mppi_figure, plot_action_distribution
+                plot_combined_mppi_figure(debug_info, self.env, eval_save_dir, step_size, goal_radius)
+                plot_action_distribution(debug_info, self.env, eval_save_dir)
             except Exception as e:
                 print(f"Error plotting MPPI: {e}")
                 import traceback

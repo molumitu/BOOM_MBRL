@@ -2,8 +2,11 @@
 Utility functions for standardized evaluation plotting.
 
 This module provides functions to create standardized plots during evaluation:
-- pi_mppi.png: 2x2 grid showing PI-MPPI trajectory evolution
-- flow_mppi.png: 2x2 grid showing Flow-MPPI trajectory evolution
+- mppi_0_combined.png: 1x3 grid showing MPPI trajectory evolution
+  [0] All proposals
+  [1] Elite 1 first MPPI iteration
+  [2] Elite 1 last MPPI iteration
+- mppi_1_action_distribution.png: Action distribution histogram with value scatter
 - buffer_stat.png: Action-reward distribution from replay buffer
 """
 
@@ -16,146 +19,32 @@ from typing import List, Dict, Any, Optional
 import torch
 
 
-def prepare_mppi_plot_data(debug_info: Dict[str, Any], policy_type: str = 'pi') -> Dict[str, Any]:
+
+def plot_combined_mppi_figure(debug_info: Dict[str, Any], env, save_dir: str, step_size: float, goal_radius: float):
+    """Plot 0: Combined figure with 3 subplots in 1x3 grid.
+    - [0]: All proposals
+    - [1]: Elite 1 first MPPI iteration
+    - [2]: Elite 1 last MPPI iteration
     """
-    Prepare MPPI data for plotting using boom.common.debug.plot_trajs format.
-
-    Args:
-        debug_info: Debug information from MPPI planning
-        policy_type: 'pi' or 'flow'
-
-    Returns:
-        Dictionary with plot data in plot_trajs format
-    """
-    mppi_key = f'{policy_type}_mppi'
-    if mppi_key not in debug_info:
-        return None
-
-    mppi_data = debug_info[mppi_key]
-    iterations = mppi_data.get('iterations', [])
-
-    if not iterations:
-        return None
-
-    # Get initial actions and values
-    init_actions = mppi_data.get('init_actions')  # [H, num_samples, A]
-    if init_actions is None:
-        return None
-
-    # Convert to numpy if tensor
-    if torch.is_tensor(init_actions):
-        init_actions = init_actions.cpu().numpy()
-
-    # Get values from first iteration
-    first_iter = iterations[0]
-    values = first_iter.get('values')  # [num_samples]
-    if torch.is_tensor(values):
-        values = values.cpu().numpy()
-
-    # Determine number of guided vs random trajectories
-    # Based on the MPPI implementation, samples are organized as:
-    # [policy_guided, random_samples]
-    num_samples = init_actions.shape[1]
-
-    # For PI-MPPI: first num_pi_trajs are pi-guided, rest are random
-    # For Flow-MPPI: first num_flow_trajs are flow-guided, rest are random
-    # We need to determine this from the configuration
-    # For now, assume first half are guided, second half are random
-    num_guided = num_samples // 2
-    num_random = num_samples - num_guided
-
-    # Split actions and values
-    guided_actions = init_actions[:, :num_guided, :]  # [H, num_guided, A]
-    random_actions = init_actions[:, num_guided:, :]  # [H, num_random, A]
-
-    guided_values = values[:num_guided] if values is not None else None
-    random_values = values[num_guided:] if values is not None else None
-
-    # Create plot data in plot_trajs format
-    plot_data = {
-        'num_pi': 0,
-        'num_flow': 0,
-        'num_random': num_random,
-    }
-
-    if policy_type == 'pi':
-        plot_data['pi_actions'] = guided_actions
-        plot_data['pi_values'] = guided_values
-    else:  # flow
-        plot_data['flow_actions'] = guided_actions
-        plot_data['flow_values'] = guided_values
-
-    plot_data['random_actions'] = random_actions
-    plot_data['random_values'] = random_values
-
-    return plot_data
-
-
-def plot_mppi_2x2(debug_info: Dict[str, Any], env, save_path: str, policy_type: str = 'pi', real_trajectories=None):
-    """
-    Create 2 separate plots for multimodal MPPI visualization.
-
-    Layout:
-    - Plot 0: Combined figure with all proposals (top-left) + 5 elite MPPI iterations (2x3 grid)
-    - Plot 1: Action distribution histogram (pi/flow)
-
-    Args:
-        debug_info: Debug information from MPPI planning (multimodal format)
-        env: Environment instance for plotting context
-        save_path: Base path for saving figures (will append _0, _1, etc.)
-        policy_type: Unused (kept for compatibility)
-        real_trajectories: List of real execution trajectories from evaluation (not used here)
-    """
-    if not debug_info:
-        print(f"Warning: No debug data available")
-        return
-
-    # Import from boom.common.debug
     from boom.common.debug import _simulate_from_actions, _setup_goals_on_axis, _compute_colormap_norm
 
-    # Get environment parameters
-    step_size = getattr(env, 'step_size', 0.1)
-    goal_radius = getattr(env, 'goal_radius', 0.1)
+    # Create figure with 1x3 grid
+    fig = plt.figure(figsize=(18, 6))
+    gs = GridSpec(1, 3, figure=fig, hspace=0.3, wspace=0.3)
 
-    # Create save directory
-    save_dir = os.path.dirname(save_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Generate plots
-    _plot_combined_mppi_figure(debug_info, env, save_dir, step_size, goal_radius)  # Plot 0
-    _plot_action_distribution(debug_info, env, save_dir)  # Plot 1
-
-    print(f"Saved 2 MPPI plots to {save_dir}")
-
-
-def _plot_combined_mppi_figure(debug_info: Dict[str, Any], env, save_dir: str, step_size: float, goal_radius: float):
-    """Plot 0: Combined figure with all proposals (0,0) + 5 elite MPPI iterations in 2x3 grid."""
-    from boom.common.debug import _simulate_from_actions, _setup_goals_on_axis, _compute_colormap_norm
-
-    # Create figure with 2x3 grid
-    fig = plt.figure(figsize=(18, 12))
-    gs = GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
-
-    # ==================== Top-left: All proposals ====================
+    # ==================== Subplot 0: All proposals ====================
     ax0 = fig.add_subplot(gs[0, 0])
     _plot_all_proposals_on_axis(debug_info, ax0, step_size, goal_radius)
 
-    # ==================== Plot elite MPPI iterations in remaining subplots ====================
-    refinements = debug_info.get('refinements', [])
+    # ==================== Subplot 1: Elite 1 first MPPI iteration ====================
+    ax1 = fig.add_subplot(gs[0, 1])
+    _plot_elite_mppi_iteration_on_axis(debug_info, ax1, step_size, goal_radius,
+                                        elite_idx=0, iteration='first')
 
-    # Grid positions for elite plots: [0,1], [0,2], [1,0], [1,1], [1,2]
-    elite_positions = [(0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
-
-    for i, pos in enumerate(elite_positions):
-        if i < len(refinements):
-            ax = fig.add_subplot(gs[pos[0], pos[1]])
-            _plot_elite_mppi_on_axis(debug_info, ax, step_size, goal_radius, i)
-        else:
-            # Create empty subplot if no refinement data
-            ax = fig.add_subplot(gs[pos[0], pos[1]])
-            ax.text(0.5, 0.5, f'No Elite {i+1} Data',
-                   transform=ax.transAxes, ha='center', va='center',
-                   fontsize=12, style='italic', color='gray')
+    # ==================== Subplot 2: Elite 1 last MPPI iteration ====================
+    ax2 = fig.add_subplot(gs[0, 2])
+    _plot_elite_mppi_iteration_on_axis(debug_info, ax2, step_size, goal_radius,
+                                        elite_idx=0, iteration='last')
 
     # Save combined figure
     save_path = os.path.join(save_dir, 'mppi_0_combined.png')
@@ -165,7 +54,7 @@ def _plot_combined_mppi_figure(debug_info: Dict[str, Any], env, save_dir: str, s
 
 
 def _plot_all_proposals_on_axis(debug_info: Dict[str, Any], ax, step_size: float, goal_radius: float):
-    """Plot all proposals on given axis."""
+    """Plot all proposals on given axis with different styles for each type."""
     from boom.common.debug import _simulate_from_actions, _setup_goals_on_axis, _compute_colormap_norm
 
     # Collect all candidates
@@ -224,33 +113,44 @@ def _plot_all_proposals_on_axis(debug_info: Dict[str, Any], ax, step_size: float
 
     _setup_goals_on_axis(ax, goal_radius, show_gradient=False)
 
+    # Plot trajectories with different styles based on type
     for i in range(num_samples):
         actions_rad = all_actions[:, i, :] * np.pi
         positions = _simulate_from_actions(actions_rad, step_size)
         value = all_values[i]
         traj_type = all_types[i] if i < len(all_types) else 'unknown'
 
-        # Use value-based colormap
-        if norm is not None and cmap is not None:
-            color = cmap(norm(value))
-        else:
-            color = '#9467bd'
-
-        # Highlight top-5 with thicker lines
+        # Highlight top-5 with red color
         is_top_5 = i in top_5_indices
-        linewidth = 3.5 if is_top_5 else 1.5
-        alpha = 1.0 if is_top_5 else 0.6
 
-        # Different line styles for different types
+        if is_top_5:
+            color = 'red'
+        else:
+            # Use value-based colormap for non-top-5
+            if norm is not None and cmap is not None:
+                color = cmap(norm(value))
+            else:
+                color = '#9467bd'
+
+        # Different styles for different types (similar to debug.py)
         if traj_type == 'random':
             linestyle = ':'
+            linewidth = 2.5 if is_top_5 else 1.0
+            alpha = 0.9 if is_top_5 else 0.4
+            zorder = 4
         elif traj_type == 'pi':
             linestyle = '--'
+            linewidth = 3.0 if is_top_5 else 1.5
+            alpha = 1.0 if is_top_5 else 0.6
+            zorder = 5
         else:  # flow
             linestyle = '-'
+            linewidth = 3.0 if is_top_5 else 1.5
+            alpha = 1.0 if is_top_5 else 0.6
+            zorder = 6
 
         ax.plot(positions[:, 0], positions[:, 1],
-              color=color, linestyle=linestyle, alpha=alpha, linewidth=linewidth, zorder=6)
+              color=color, linestyle=linestyle, alpha=alpha, linewidth=linewidth, zorder=zorder)
 
     # Add colorbar
     if norm is not None and cmap is not None:
@@ -264,12 +164,32 @@ def _plot_all_proposals_on_axis(debug_info: Dict[str, Any], ax, step_size: float
     flow_count = sum(1 for t in all_types if t == 'flow')
     random_count = sum(1 for t in all_types if t == 'random')
 
-    ax.set_title(f'All Proposals (Top-5 Bold, N={num_samples})\nPI:{pi_count} Flow:{flow_count} Random:{random_count}',
+    # Add legend for trajectory types
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color='gray', linestyle=':', linewidth=1.0, alpha=0.6, label=f'Random (n={random_count})'),
+        Line2D([0], [0], color='#9467bd', linestyle='--', linewidth=1.5, alpha=0.6, label=f'PI (n={pi_count})'),
+        Line2D([0], [0], color='#1f77b4', linestyle='-', linewidth=1.5, alpha=0.6, label=f'Flow (n={flow_count})'),
+    ]
+    ax.legend(handles=legend_elements, fontsize=9, loc='upper right')
+
+    ax.set_title(f'All Proposals (Top-5 Bold, N={num_samples})',
                 fontsize=14, fontweight='bold')
 
 
-def _plot_elite_mppi_on_axis(debug_info: Dict[str, Any], ax, step_size: float, goal_radius: float, elite_idx: int):
-    """Plot elite MPPI initial iteration on given axis."""
+def _plot_elite_mppi_iteration_on_axis(debug_info: Dict[str, Any], ax, step_size: float, goal_radius: float,
+                                       elite_idx: int, iteration: str = 'first'):
+    """Plot elite MPPI iteration (first or last) on given axis.
+
+    Args:
+        debug_info: Debug information from MPPI planning
+        ax: Matplotlib axis to plot on
+        step_size: Step size for trajectory simulation
+        goal_radius: Goal radius for environment visualization
+        elite_idx: Index of the elite trajectory to plot
+        iteration: 'first' or 'last' iteration to plot
+        iteration: 'first' or 'last' - which MPPI iteration to plot
+    """
     from boom.common.debug import _simulate_from_actions, _setup_goals_on_axis, _compute_colormap_norm
 
     refinements = debug_info.get('refinements', [])
@@ -281,16 +201,32 @@ def _plot_elite_mppi_on_axis(debug_info: Dict[str, Any], ax, step_size: float, g
         return
 
     elite_refinement = refinements[elite_idx]
-    first_iter = elite_refinement[0] if elite_refinement else None
 
-    if first_iter is None or 'init_actions' not in first_iter:
-        ax.text(0.5, 0.5, f'No Elite {elite_idx+1} Data',
+    # Get the requested iteration
+    if iteration == 'first':
+        iter_data = elite_refinement[0] if elite_refinement else None
+        title_suffix = 'First Iter'
+        actions_key = 'init_actions'
+        values_key = 'init_values'
+    elif iteration == 'last':
+        iter_data = elite_refinement[-1] if elite_refinement else None
+        title_suffix = 'Last Iter'
+        actions_key = 'final_actions'
+        values_key = 'final_values'
+    else:
+        ax.text(0.5, 0.5, f'Invalid iteration: {iteration}',
                transform=ax.transAxes, ha='center', va='center',
                fontsize=12, style='italic', color='gray')
         return
 
-    init_actions = first_iter['init_actions']  # [H, num_samples, A]
-    init_values = first_iter['init_values']    # [num_samples]
+    if iter_data is None or actions_key not in iter_data:
+        ax.text(0.5, 0.5, f'No Elite {elite_idx+1} {title_suffix} Data',
+               transform=ax.transAxes, ha='center', va='center',
+               fontsize=12, style='italic', color='gray')
+        return
+
+    init_actions = iter_data[actions_key]  # [H, num_samples, A]
+    init_values = iter_data[values_key]    # [num_samples]
 
     if torch.is_tensor(init_actions):
         init_actions = init_actions.cpu().numpy()
@@ -304,6 +240,10 @@ def _plot_elite_mppi_on_axis(debug_info: Dict[str, Any], ax, step_size: float, g
 
     _setup_goals_on_axis(ax, goal_radius, show_gradient=False)
 
+    # All sampled trajectories use thin uniform style (no type distinction needed)
+    sample_linewidth = 0.5  # Very thin lines for the many random samples
+    sample_alpha = 0.3  # Low alpha for better visibility
+
     for i in range(num_samples):
         actions_rad = init_actions[:, i, :] * np.pi
         positions = _simulate_from_actions(actions_rad, step_size)
@@ -316,17 +256,19 @@ def _plot_elite_mppi_on_axis(debug_info: Dict[str, Any], ax, step_size: float, g
             color = '#1f77b4'
 
         ax.plot(positions[:, 0], positions[:, 1],
-              color=color, alpha=0.5, linewidth=1.2, zorder=6)
+              color=color, alpha=sample_alpha, linewidth=sample_linewidth, zorder=6)
 
-    # Plot mean trajectory
-    mean = first_iter.get('mean')
+    # Plot mean trajectory (the unique elite trajectory)
+    mean = iter_data.get('mean')
     if mean is not None:
         if torch.is_tensor(mean):
             mean = mean.cpu().numpy()
         mean_actions_rad = mean * np.pi
         mean_positions = _simulate_from_actions(mean_actions_rad, step_size)
+
+        # Mean trajectory uses thick red line to stand out
         ax.plot(mean_positions[:, 0], mean_positions[:, 1],
-              color='red', linewidth=3.0, zorder=7, label='Mean')
+              color='red', linewidth=3.0, zorder=7, label='Mean Elite Trajectory')
 
     # Add colorbar
     if norm is not None and cmap is not None:
@@ -335,12 +277,13 @@ def _plot_elite_mppi_on_axis(debug_info: Dict[str, Any], ax, step_size: float, g
         plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
         ax.set_ylabel('Value', fontsize=10)
 
-    ax.set_title(f'Elite {elite_idx+1}: MPPI Init (N={num_samples})',
+    # Update title
+    ax.set_title(f'Elite {elite_idx+1}: {title_suffix} (N={num_samples})',
                 fontsize=14, fontweight='bold')
     ax.legend(fontsize=10)
 
 
-def _plot_action_distribution(debug_info: Dict[str, Any], env, save_dir: str):
+def plot_action_distribution(debug_info: Dict[str, Any], env, save_dir: str):
     """Plot action distribution histogram with value scatter on secondary y-axis."""
     # Collect all candidates with types and values
     all_actions = []
