@@ -198,7 +198,6 @@ class WorldModel(nn.Module):
         time_step = 1.0 / n_steps
         
         action = torch.randn(B, self.cfg.action_dim, device=device, dtype=dtype)
-        action = torch.clamp(action,-1.0,1.0)
 
         for i in range(n_steps):
             time_end = time_start + time_step

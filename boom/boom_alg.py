@@ -337,7 +337,9 @@ class BOOM:
 
 		# Use executed action as supervision target
 		assert action is not None, "action mode requires action parameter"
-		x1 = action
+		# IMPORTANT: flow_policy outputs tanh(integrated_action), so we need atanh to get raw action
+		epsilon = 0.999999
+		x1 = torch.atanh(torch.clamp(action, -epsilon, epsilon))
 
 		# Sample x0 from standard normal
 		x0 = torch.randn_like(x1)
