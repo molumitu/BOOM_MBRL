@@ -7,7 +7,7 @@ from tensordict.tensordict import TensorDict
 from boom.trainer.base import Trainer
 import matplotlib.pyplot as plt
 import os
-from toy_exp.eval_plot_utils import plot_final_trajectories, plot_buffer_stats
+from toy_exp.eval_plot_utils import plot_all_debug_info, plot_buffer_stats
 
 
 class OnlineTrainer(Trainer):
@@ -48,7 +48,6 @@ class OnlineTrainer(Trainer):
         - buffer_stat.png: Action-reward distribution from buffer
         """
         ep_rewards, ep_successes = [], []
-        mppi_debug_data = []  # Collect MPPI debug info from first episode
         real_trajectories = []  # Collect real trajectories from all episodes
 
         # Run evaluation episodes
@@ -57,23 +56,18 @@ class OnlineTrainer(Trainer):
             trajectory = []
 
             # Get initial position
-            if hasattr(self.env, '_env'):
-                trajectory.append(self.env._env.agent_pos.copy())
-            elif hasattr(self.env, 'agent_pos'):
-                trajectory.append(self.env.agent_pos.copy())
+            trajectory.append(self.env.agent_pos.copy())
 
             if self.cfg.save_video:
                 self.logger.video.init(self.env, enabled=(i == 0))
 
             while not done:
                 # Get debug info only for first episode, first timestep
-                need_debug = (i == 0 and t == 0)
-                result = self.agent.act(obs, t0=(t == 0), eval_mode=True, debug=need_debug)
+                debug = (i == 0 and t == 0)
+                result = self.agent.act(obs, t0=(t == 0), eval_mode=True, debug=debug)
 
-                if need_debug:
+                if debug:
                     action, _, _, debug_info = result
-                    if debug_info:
-                        mppi_debug_data.append(debug_info)
                 else:
                     action, _, _ = result
 
@@ -83,10 +77,7 @@ class OnlineTrainer(Trainer):
                 t += 1
 
                 # Record trajectory
-                if hasattr(self.env, '_env'):
-                    trajectory.append(self.env._env.agent_pos.copy())
-                elif hasattr(self.env, 'agent_pos'):
-                    trajectory.append(self.env.agent_pos.copy())
+                trajectory.append(self.env.agent_pos.copy())
 
                 if self.cfg.save_video:
                     self.logger.video.record(self.env)
@@ -101,59 +92,17 @@ class OnlineTrainer(Trainer):
                 'reward': ep_reward
             })
 
-            if self.cfg.save_video:
-                self.logger.video.save(self._step, key='results/video')
-
         # Create standardized evaluation plots
         eval_save_dir = os.path.join(self.cfg.work_dir, 'eval', f'step_{self._step}')
         os.makedirs(eval_save_dir, exist_ok=True)
 
-        # Plot final trajectories
-        final_trajs_path = os.path.join(eval_save_dir, 'final_trajectories.png')
-        plot_final_trajectories(real_trajectories, self.env, final_trajs_path)
+        # Plot debug figures
+        plot_all_debug_info(real_trajectories, debug_info, eval_save_dir)
 
-        # Plot MPPI debug figures
-        if mppi_debug_data and len(mppi_debug_data) > 0:
-            debug_info = mppi_debug_data[0]  # Use first episode data
-
-            # Get environment parameters
-            step_size = getattr(self.env, 'step_size', 0.1)
-            goal_radius = getattr(self.env, 'goal_radius', 0.1)
-
-            try:
-                # Plot combined figure and action distribution
-                from toy_exp.eval_plot_utils import plot_combined_mppi_figure, plot_action_distribution
-                plot_combined_mppi_figure(debug_info, self.env, eval_save_dir, step_size, goal_radius)
-                plot_action_distribution(debug_info, self.env, eval_save_dir)
-            except Exception as e:
-                print(f"Error plotting MPPI: {e}")
-                import traceback
-                traceback.print_exc()
-
-        print(f"Evaluation plots saved to {eval_save_dir}")
-
-
-        # Evaluate PI policy if enabled
-        if self.cfg.eval_pi:
-            ep_rewards_pi, ep_successes_pi = [], []
-            for i in range(self.cfg.eval_episodes):
-                obs, done, ep_reward, t = self.env.reset()[0], False, 0, 0
-                while not done:
-                    action, _, _ = self.agent.act(obs, t0=(t == 0), eval_mode=True, use_pi=True)
-                    obs, reward, done, truncated, info = self.env.step(action)
-                    done = done or truncated
-                    ep_reward += reward
-                    t += 1
-                ep_rewards_pi.append(ep_reward)
-                ep_successes_pi.append(info["success"])
-        else:
-            ep_rewards_pi, ep_successes_pi = [np.nan], [np.nan]
 
         return dict(
             episode_reward=np.nanmean(ep_rewards),
             episode_success=np.nanmean(ep_successes),
-            episode_reward_pi=np.nanmean(ep_rewards_pi),
-            episode_success_pi=np.nanmean(ep_successes_pi),
         )
 
     @torch.no_grad()
@@ -184,51 +133,27 @@ class OnlineTrainer(Trainer):
             q_value=np.nanmean(q_values),
         )
 
-    def plot_action_reward_distribution(self, replay_action, replay_reward, step):
-        """Plot action-reward distribution as scatter plots.
+    @torch.no_grad()
+    def eval_buffer(self):
+        try:
+            # Sample a batch from replay buffer and estimate values
+            replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task = self.buffer.sample()
 
-        Args:
-            replay_action: Tensor of shape [T, B, D] where T is time steps, B is batch size, D is action dim
-            replay_reward: Tensor of shape [T, B, 1]
-            step: Current training step for filename
-        """
-        # Convert to numpy if needed
-        if torch.is_tensor(replay_action):
-            replay_action = replay_action.detach().cpu().numpy()
-        if torch.is_tensor(replay_reward):
-            replay_reward = replay_reward.detach().cpu().numpy()
+            # Encode observations to latent space
+            device = self.agent.device
+            replay_z = self.agent.model.encode(replay_obs[0].to(device), None)
 
-        T, B, D = replay_action.shape
+            # Estimate values using the model
+            replay_value = self.agent._estimate_value(replay_z, replay_action.to(device), None, self.cfg['horizon'])
 
-        # Create figure with T columns and D rows
-        fig, axes = plt.subplots(D, T, figsize=(4 * T, 3 * D), squeeze=False)
+            # Plot buffer statistics
+            eval_save_dir = os.path.join(self.cfg.work_dir, 'eval', f'step_{self._step}')
+            plot_buffer_stats(replay_obs, replay_action, replay_value, self._step, eval_save_dir, prefix='act')
+            plot_buffer_stats(replay_obs, replay_mu, replay_value, self._step, eval_save_dir, prefix='mu')
+        except Exception as e:
+            print(e)
 
-        # Plot scatter plots for each timestep and action dimension
-        for t in range(T):
-            for d in range(D):
-                ax = axes[d, t]
-                # Extract action values for dimension d across all batches
-                action_values = replay_action[t, :, d]  # Shape: [B]
-                reward_values = replay_reward[:, 0]  # Shape: [B]
 
-                # Create scatter plot
-                ax.scatter(action_values, reward_values, alpha=0.5, s=20)
-                ax.set_xlabel(f'Action')
-                ax.set_ylabel('Reward')
-                ax.set_title(f'Timestep {t}, Action dim {d}')
-                ax.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-
-        # Save figure
-        save_dir = os.path.join(self.cfg.work_dir, 'action_reward_plots')
-        os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, f'action_reward_dist_step_{step}.png')
-        print(f"Buffer plot saved to {save_path}")
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-
-        print(f"Action-reward distribution plot saved to {save_path}")
 
     def to_td(self, obs, action=None, mu=None, std=None, reward=None):
         """Creates a TensorDict for a new episode."""
@@ -273,38 +198,7 @@ class OnlineTrainer(Trainer):
                     eval_metrics.update(self.common_metrics())
                     self.logger.log(eval_metrics, "eval")
 
-                    # Plot buffer statistics
-                    if self._step > self.cfg.seed_steps:
-                        # Sample a batch from replay buffer and estimate values
-                        replay_obs, replay_action, replay_mu, replay_std, replay_reward, replay_task = self.buffer.sample()
-
-                        # Stack into tensors if they are lists
-                        if isinstance(replay_obs, list):
-                            replay_obs = torch.stack(replay_obs)
-                        if isinstance(replay_action, list):
-                            replay_action = torch.stack(replay_action)
-
-                        # Encode observations to latent space
-                        device = self.agent.device
-                        replay_z = self.agent.model.encode(replay_obs[0].to(device), None)
-
-                        # Estimate values using the model
-                        horizon = getattr(self.agent.cfg, 'horizon', 1)
-                        replay_reward_estimated = self.agent._estimate_value(
-                            replay_z,
-                            replay_action.to(device),
-                            None,
-                            horizon
-                        )
-
-                        # Plot buffer statistics
-                        eval_save_dir = os.path.join(self.cfg.work_dir, 'eval', f'step_{self._step}')
-                        plot_buffer_stats(
-                            replay_action,
-                            replay_reward_estimated,
-                            self._step,
-                            eval_save_dir
-                        )
+                    self.eval_buffer()
 
                     eval_next = False
       

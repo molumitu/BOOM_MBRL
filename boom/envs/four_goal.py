@@ -311,59 +311,6 @@ class FourGoalNavigationEnv(gym.Env):
         plt.pause(0.001)
         return None
 
-    def plot_trajectories(self, trajectories, step, save_dir):
-        """Plot real trajectories from evaluation episodes.
-
-        Args:
-            trajectories: List of trajectory dictionaries with keys:
-                         - 'trajectory': list of (x, y) positions
-                         - 'reached_goal': which goal was reached (None if failed)
-                         - 'reward': episode reward
-            step: Current training step
-            save_dir: Directory to save the plot
-
-        This method now wraps the unified plot_trajs function from boom.common.debug.
-        """
-        from boom.common.debug import plot_trajs
-
-        return plot_trajs(
-            trajectories=trajectories,
-            step=step,
-            save_dir=save_dir,
-            traj_type='real',
-            layout='single',
-            use_value_cmap=False,  # Use goal-based coloring for real trajs
-            step_size=self.step_size,
-            goal_radius=self.goal_radius,
-            show_stats=True
-        )
-
-    def plot_mppi_init_trajs(self, mppi_init_trajs, step, save_dir):
-        """Plot MPPI initial trajectories from the first planning step.
-
-        Args:
-            mppi_init_trajs: List of dictionaries containing initial trajectory info from MPPI
-            step: Current training step
-            save_dir: Directory to save the plot
-
-        This method now wraps the unified plot_trajs function from boom.common.debug.
-        """
-        from boom.common.debug import plot_trajs
-
-        return plot_trajs(
-            trajectories=mppi_init_trajs,
-            step=step,
-            save_dir=save_dir,
-            traj_type='mppi',
-            layout='multi',      # Multi-episode grid for MPPI
-            use_value_cmap=True, # Use value-based colormap
-            step_size=self.step_size,
-            goal_radius=self.goal_radius,
-            max_episodes=4,
-            show_stats=False
-        )
-
-
     def close(self):
         """Clean up rendering resources."""
         if self.fig is not None:

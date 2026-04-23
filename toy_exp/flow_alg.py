@@ -7,7 +7,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from boom.common import math
 from boom.common.scale import RunningScale
 from boom.common.world_model import WorldModel
-from boom.common.debug import plot_mppi_debug
 
 class BOOM:
 	"""
@@ -48,11 +47,11 @@ class BOOM:
 		if self.cfg.update_flow:
 			# Flow policy optimizer
 			self.flow_optim = torch.optim.Adam(
-				self.model._flow_pi.parameters(),
-				lr=self.cfg.lr,
+				self.model._flow_pi.parameters(), 
+				lr=self.cfg.lr, 
 				eps=1e-5
 			)
-
+	
 		self.model.eval()
 		self.scale_pi = RunningScale(cfg)
 		if self.cfg.update_flow:
@@ -79,9 +78,6 @@ class BOOM:
 			self.model._pi = torch.compile(self.model._pi)
 			if self.cfg.update_flow:
 				self.model._flow_pi = torch.compile(self.model._flow_pi)
-
-		# Create debug directory
-		self.mppi_debug_dir = None
 
 	def _get_discount(self, episode_length):
 		"""
@@ -138,24 +134,26 @@ class BOOM:
 				t0 (bool): Whether this is the first observation in the episode.
 				eval_mode (bool): Whether to use the mean of the action distribution.
 				task (int): Task index (only used for multi-task experiments).
-				debug (bool): If True, return MPPI trajectory debug info.
+				debug (bool): Whether to collect debug information.
 
 		Returns:
 				action: Action to take in the environment.
 				mu: Mean action.
 				std: Std of action distribution.
-				debug_info (dict, optional): MPPI trajectory debug info (only if debug=True).
+				debug_info (dict, optional): Debug information (only if debug=True).
 		"""
 		obs = obs.to(self.device, non_blocking=True).unsqueeze(0)
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		z = self.model.encode(obs, task)
 		if self.cfg.mpc and not use_pi and not use_flow:
+			result = self.plan(z, t0=t0, eval_mode=eval_mode, task=task, debug=debug)
 			if debug:
-				a, mu, std, info = self.plan(z, t0=t0, eval_mode=eval_mode, task=task, debug=debug)
-				return a.cpu(), mu.cpu(), std.cpu(), info
-			a, mu, std = self.plan(z, t0=t0, eval_mode=eval_mode, task=task, debug=debug)
-			return a.cpu(), mu.cpu(), std.cpu()
+				a, mu, std, debug_info = result
+				return a.cpu(), mu.cpu(), std.cpu(), debug_info
+			else:
+				a, mu, std = result
+				return a.cpu(), mu.cpu(), std.cpu()
 		elif use_pi:
 			mu, pi, log_pi, log_std = self.model.pi(z, task)
 			if eval_mode:
@@ -189,55 +187,38 @@ class BOOM:
 	@torch.no_grad()
 	def plan(self, z, t0=False, eval_mode=False, task=None, debug=False):
 		"""
-		Plan a sequence of actions using the learned world model with multimodal MPPI refinement.
-
-		This method:
-		1. Generates trajectory candidates from both pi and flow policies
-		2. Evaluates all candidates and selects top K* trajectories with lowest cost
-		3. Refines each selected trajectory independently using MPPI (parallel execution)
-		4. Selects the lowest-cost refined trajectory for execution
-
-		By refining promising modes separately, this preserves multimodal structure
-		and avoids collapsing distinct modes into a suboptimal intermediate solution.
+		Plan a sequence of actions using the learned world model.
 
 		Args:
 			z (torch.Tensor): Latent state from which to plan.
 			t0 (bool): Whether this is the first observation in the episode.
 			eval_mode (bool): Whether to use the mean of the action distribution.
 			task (torch.Tensor): Task index for multi-task experiments.
-			debug (bool): If True, save and return MPPI trajectory debug info.
+			debug (bool): Whether to collect debug information.
 
 		Returns:
 			torch.Tensor: Action to take in the environment.
 		"""
-		# Configuration
 		num_pi = self.cfg["num_pi_trajs"]
 		num_flow = self.cfg["num_flow_trajs"] if self.cfg["update_flow"] else 0
-		num_proposals = num_pi + num_flow
-		num_elite_trajs = getattr(self.cfg, "num_elite_trajs", 5)  # K*: number of top trajectories to refine
-		mppi_iterations = self.cfg.iterations  # MPPI refinement iterations per elite trajectory
+		num_guide = num_pi + num_flow
 
-		# Initialize debug info storage
-		debug_info = {}
+		assert num_guide <= self.cfg.num_samples, \
+			"num_pi_trajs + num_flow_trajs must be <= num_samples"
+
+		# Initialize debug info
+		debug_info = None
 		if debug:
 			debug_info = {
-				'pi_candidates': [],
-				'flow_candidates': [],
-				'random_candidates': [],
-				'elite_indices': [],
-				'elite_types': [],
+				'pi_candidates': {},
+				'flow_candidates': {},
+				'random_candidates': {},
 				'refinements': [],
 			}
-		if num_proposals == 0:
-			raise ValueError("num_pi_trajs + num_flow_trajs must be > 0 for multimodal MPPI refinement")
 
-		# ==================================================
-		# Step 1: Generate trajectory candidates from pi and flow
-		# ==================================================
-		all_proposal_actions = []
-		proposal_types = []  # Track which policy generated each trajectory
-
-		# 1a) Generate trajectories from pi
+		# --------------------------------------------------
+		# 1) Build guided trajectories from pi
+		# --------------------------------------------------
 		pi_actions = None
 		if num_pi > 0:
 			pi_actions = torch.empty(
@@ -251,10 +232,10 @@ class BOOM:
 				pi_actions[t] = self.model.pi(_z, task)[1]
 				_z = self.model.next(_z, pi_actions[t], task)
 			pi_actions[-1] = self.model.pi(_z, task)[1]
-			all_proposal_actions.append(pi_actions)
-			proposal_types.extend(['pi'] * num_pi)
 
-		# 1b) Generate trajectories from flow
+		# --------------------------------------------------
+		# 2) Build guided trajectories from flow
+		# --------------------------------------------------
 		flow_actions = None
 		if num_flow > 0:
 			flow_actions = torch.empty(
@@ -268,195 +249,139 @@ class BOOM:
 				flow_actions[t] = self.model.flow_policy(_z)
 				_z = self.model.next(_z, flow_actions[t], task)
 			flow_actions[-1] = self.model.flow_policy(_z)
-			all_proposal_actions.append(flow_actions)
-			proposal_types.extend(['flow'] * num_flow)
 
-		# 1c) Generate random trajectories to fill up to num_samples
-		num_random = max(0, self.cfg.num_samples - num_proposals)
-		random_actions = None
-		if num_random > 0:
-			random_actions = torch.rand(
-				self.cfg.horizon,
-				num_random,
-				self.cfg.action_dim,
-				device=self.device,
-			) * 2 - 1  # Uniform in [-1, 1]
-			all_proposal_actions.append(random_actions)
-			proposal_types.extend(['random'] * num_random)
+		# --------------------------------------------------
+		# 3) Initialize MPPI state and distribution
+		# --------------------------------------------------
+		z = z.repeat(self.cfg.num_samples, 1)
 
-		# Concatenate all proposals: [H, num_total, A]
-		all_proposal_actions = torch.cat(all_proposal_actions, dim=1)
+		mean = torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device)
+		std = self.cfg.max_std * torch.ones(
+			self.cfg.horizon, self.cfg.action_dim, device=self.device
+		)
 
-		num_total_samples = num_pi + num_flow + num_random
+		if not t0:
+			mean[:-1] = self._prev_mean[1:]
 
-		# ==================================================
-		# Step 2: Evaluate all candidates and select top K*
-		# ==================================================
-		# Evaluate all proposal candidates
-		z_expanded = z.repeat(num_total_samples, 1)
-		proposal_values = self._estimate_value(z_expanded, all_proposal_actions, task, self.cfg.horizon).nan_to_num_(0)
+		actions = torch.empty(
+			self.cfg.horizon,
+			self.cfg.num_samples,
+			self.cfg.action_dim,
+			device=self.device,
+		)
 
-		# Select top K* trajectories with lowest cost (highest value)
-		k_star = min(num_elite_trajs, num_total_samples)
-		elite_indices = torch.topk(proposal_values.squeeze(1), k_star, dim=0).indices
-		elite_proposal_actions = all_proposal_actions[:, elite_indices]  # [H, K*, A]
-		elite_proposal_values = proposal_values[elite_indices]
+		# Put guided trajectories first: [pi | flow | sampled]
+		col = 0
+		if num_pi > 0:
+			actions[:, col:col + num_pi] = pi_actions
+			col += num_pi
+		if num_flow > 0:
+			actions[:, col:col + num_flow] = flow_actions
+			col += num_flow
 
-		if debug:
-			debug_info['pi_candidates'] = {
-				'actions': pi_actions.cpu().clone() if pi_actions is not None else None,
-				'values': proposal_values.squeeze(1)[:num_pi].cpu().clone() if num_pi > 0 else None,
-			}
-			debug_info['flow_candidates'] = {
-				'actions': flow_actions.cpu().clone() if flow_actions is not None else None,
-				'values': proposal_values.squeeze(1)[num_pi:num_pi+num_flow].cpu().clone() if num_flow > 0 else None,
-			}
-			debug_info['random_candidates'] = {
-				'actions': random_actions.cpu().clone() if random_actions is not None else None,
-				'values': proposal_values.squeeze(1)[num_pi+num_flow:num_total_samples].cpu().clone() if num_random > 0 else None,
-			}
-			debug_info['elite_indices'] = elite_indices.cpu().clone()
-			debug_info['elite_types'] = [proposal_types[i.item()] for i in elite_indices]
-
-		# ==================================================
-		# Step 3: Independent MPPI refinement for each elite trajectory (parallel)
-		# ==================================================
-		refined_trajectories = []
-		refined_values = []
-
-		for k in range(k_star):
-			# Initialize MPPI with this elite trajectory as reference
-			ref_traj = elite_proposal_actions[:, k]  # [H, A]
-
-			# Initialize mean and std for refinement
-			mean = ref_traj.clone()  # Start from the elite trajectory
-			std = self.cfg.max_std * torch.ones(
-				self.cfg.horizon, self.cfg.action_dim, device=self.device
-			)
-
-			# Prepare sampling around this reference trajectory
-			z_samples = z.repeat(self.cfg.num_samples, 1)
-
-			for iter_idx in range(mppi_iterations):
-				# Sample perturbations around the reference trajectory
-				actions = (
+		# --------------------------------------------------
+		# 4) Iterate MPPI
+		# --------------------------------------------------
+		for iter_idx in range(self.cfg.iterations):
+			# Sample only the non-guided trajectories
+			num_random = self.cfg.num_samples - num_guide
+			if num_random > 0:
+				actions[:, num_guide:] = (
 					mean.unsqueeze(1)
 					+ std.unsqueeze(1)
 					* torch.randn(
 						self.cfg.horizon,
-						self.cfg.num_samples,
+						num_random,
 						self.cfg.action_dim,
 						device=std.device,
 					)
-				)
-				# Apply periodic wrapping for angular actions
-				actions = ((actions + 1) % 2) - 1
+				).clamp(-1, 1)
 
-				if self.cfg.multitask:
-					actions = actions * self.model._action_masks[task]
+			if self.cfg.multitask:
+				actions = actions * self.model._action_masks[task]
 
-				# Compute values and select elite
-				value = self._estimate_value(z_samples, actions, task, self.cfg.horizon).nan_to_num_(0)
-				elite_idxs = torch.topk(
-					value.squeeze(1), self.cfg.num_elites, dim=0
-				).indices
-				elite_value, elite_actions = value[elite_idxs], actions[:, elite_idxs]
+			# Compute elite actions
+			value = self._estimate_value(z, actions, task, self.cfg.horizon).nan_to_num_(0)
+			elite_idxs = torch.topk(
+				value.squeeze(1), self.cfg.num_elites, dim=0
+			).indices
+			elite_value, elite_actions = value[elite_idxs], actions[:, elite_idxs]
 
-				# Update mean and std
-				max_value = elite_value.max(0)[0]
-				score = torch.exp(self.cfg.temperature * (elite_value - max_value))
-				score /= score.sum(0)
-				score = score.squeeze()
-				score_sum = score.sum() + 1e-9
+			# Collect debug info for first iteration
+			if debug and iter_idx == 0:
+				# Save candidate trajectories and values
+				if num_pi > 0:
+					debug_info['pi_candidates']['actions'] = pi_actions.cpu().clone()
+					debug_info['pi_candidates']['values'] = value.squeeze(1)[:num_pi].cpu().clone()
+				else:
+					debug_info['pi_candidates']['actions'] = None
+					debug_info['pi_candidates']['values'] = None
 
-				mean = torch.einsum('e,hea->ha', score, elite_actions) / score_sum
+				if num_flow > 0:
+					debug_info['flow_candidates']['actions'] = flow_actions.cpu().clone()
+					debug_info['flow_candidates']['values'] = value.squeeze(1)[num_pi:num_pi+num_flow].cpu().clone()
+				else:
+					debug_info['flow_candidates']['actions'] = None
+					debug_info['flow_candidates']['values'] = None
 
-				diff = elite_actions - mean.unsqueeze(1)
-				variance = torch.einsum('e,hea->ha', score, diff ** 2) / score_sum
-				std = torch.sqrt(variance).clamp_(self.cfg.min_std, self.cfg.max_std)
+				if num_random > 0:
+					debug_info['random_candidates']['actions'] = actions[:, num_guide:].cpu().clone()
+					debug_info['random_candidates']['values'] = value.squeeze(1)[num_guide:].cpu().clone()
+				else:
+					debug_info['random_candidates']['actions'] = None
+					debug_info['random_candidates']['values'] = None
 
-				# Save debug info for this refinement
-				if debug:
-					if len(debug_info['refinements']) <= k:
-						debug_info['refinements'].append([])
+			# Update parameters
+			max_value = elite_value.max(0)[0]
+			score = torch.exp(self.cfg.temperature * (elite_value - max_value))
+			score /= score.sum(0)
+			score = score.squeeze()
+			score_sum = score.sum() + 1e-9
 
-					iter_debug = {
-						'iteration': iter_idx,
-						'mean': mean.cpu().clone(),
-						'std': std.cpu().clone(),
-						'elite_values': elite_value.squeeze(1).cpu().clone(),
-					}
+			mean = torch.einsum('e,hea->ha', score, elite_actions) / score_sum
 
-					# Save initial iteration samples for visualization
-					if iter_idx == 0:
-						iter_debug['init_actions'] = actions.cpu().clone()  # [H, num_samples, A]
-						iter_debug['init_values'] = value.squeeze(1).cpu().clone()  # [num_samples]
+			diff = elite_actions - mean.unsqueeze(1)  # [H, E, A]
+			variance = torch.einsum('e,hea->ha', score, diff ** 2) / score_sum
+			std = torch.sqrt(variance).clamp_(self.cfg.min_std, self.cfg.max_std)
 
-					# Save final iteration samples for visualization
-					if iter_idx == mppi_iterations - 1:
-						iter_debug['final_actions'] = actions.cpu().clone()  # [H, num_samples, A]
-						iter_debug['final_values'] = value.squeeze(1).cpu().clone()  # [num_samples]
+			# Collect refinement debug info
+			if debug:
+				iter_debug = {
+					'iteration': iter_idx,
+					'mean': mean.cpu().clone(),
+					'std': std.cpu().clone(),
+					'elite_values': elite_value.squeeze(1).cpu().clone(),
+				}
 
-					debug_info['refinements'][k].append(iter_debug)
+				# Save initial iteration samples
+				if iter_idx == 0:
+					iter_debug['init_actions'] = actions.cpu().clone()
+					iter_debug['init_values'] = value.squeeze(1).cpu().clone()
 
-			# Select best action from final iteration (sample from elite set)
-			final_score = torch.exp(self.cfg.temperature * (elite_value - max_value))
-			final_score /= final_score.sum(0)
-			final_score = final_score.squeeze()
+				# Save final iteration samples
+				if iter_idx == self.cfg.iterations - 1:
+					iter_debug['final_actions'] = actions.cpu().clone()
+					iter_debug['final_values'] = value.squeeze(1).cpu().clone()
 
-			best_idx = torch.multinomial(final_score, 1).item()
-			best_trajectory = elite_actions[:, best_idx]  # [H, A]
-			best_value = elite_value[best_idx]
+				debug_info['refinements'].append(iter_debug)
 
-			refined_trajectories.append(best_trajectory)
-			refined_values.append(best_value)
+		# --------------------------------------------------
+		# 5) Select first action from elite set
+		# --------------------------------------------------
+		index = torch.multinomial(score, 1).item()
+		actions = elite_actions[:, index]   # [H, A]
 
-		# Stack all refined trajectories
-		refined_trajectories = torch.stack(refined_trajectories, dim=0)  # [K*, H, A]
-		refined_values = torch.stack(refined_values, dim=0)  # [K*, 1]
-
-		# ==================================================
-		# Step 4: Select lowest-cost refined trajectory for execution
-		# ==================================================
-		best_overall_idx = torch.argmax(refined_values.squeeze(1))
-		selected_trajectory = refined_trajectories[best_overall_idx]  # [H, A]
-
-		if debug:
-			debug_info['refined_trajectories'] = refined_trajectories.cpu().clone()
-			debug_info['refined_values'] = refined_values.squeeze(1).cpu().clone()
-			debug_info['selected_idx'] = best_overall_idx.item()
-			debug_info['selected_trajectory'] = selected_trajectory.cpu().clone()
-
-		
-
-		# Extract first action
-		mu = selected_trajectory[0]
-
-		# Estimate std from elite trajectories for exploration
-		if not t0:
-			std = self._prev_std if hasattr(self, '_prev_std') else self.cfg.max_std * torch.ones(self.cfg.action_dim, device=self.device)
-		else:
-			std = self.cfg.max_std * torch.ones(self.cfg.action_dim, device=self.device)
-
-		# Save for next iteration
-		self._prev_mean = selected_trajectory[1:]  # Shift for next step
-		self._prev_mean = torch.cat([
-			self._prev_mean,
-			torch.zeros(1, self.cfg.action_dim, device=self.device)
-		], dim=0)
-		self._prev_std = std
+		self._prev_mean = mean
+		mu, std = actions[0], std[0]
 
 		if not eval_mode:
 			a = mu + std * torch.randn(self.cfg.action_dim, device=std.device)
 		else:
 			a = mu
 
-		# Periodic wrapping: map action from [-1, 1] with wraparound
-		# This handles the circular nature of angular actions where -1 and 1 represent the same angle
-		wrapped_a = ((a + 1) % 2) - 1
 		if debug:
-			return wrapped_a, mu, std, debug_info
-		return wrapped_a, mu, std
+			return a.clamp_(-1, 1), mu, std, debug_info
+		return a.clamp_(-1, 1), mu, std
 
 	def update_flow(self, z, action, task):
 		"""
@@ -537,7 +462,7 @@ class BOOM:
 			"flow_q_values_mean": Q_values.mean().detach(),
 		}
 		return flow_bc_loss, info
-
+	
 	def update_pi(self, zs, action, mu, std, task, step):
 		"""
 		Update Gaussian policy and mean-flow policy.
@@ -565,7 +490,7 @@ class BOOM:
 		qs = self.model.Q(zs, pis, task, return_type="min")
 		self.scale_pi.update(qs[0])
 		qs = self.scale_pi(qs)
-
+			
 		############### Compute max Q loss ###############
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
 		q_loss = ((self.cfg.entropy_coef * log_pis - qs).mean(dim=(1, 2)) * rho).mean()
@@ -580,7 +505,7 @@ class BOOM:
 		forward_kl = self.scale_pi(forward_kl) if self.scale_pi.value > 2.0 else torch.zeros_like(forward_kl)
 		forward_kl = torch.softmax(qs.detach().squeeze(),dim=-1) * forward_kl
 		fkl_loss = - (forward_kl.sum(dim=-1) * rho).mean()
-
+		
 		############### Combine losses and update ###############
 		pi_loss = q_loss + (self.cfg.action_dim / 1000) * fkl_loss
 		pi_loss.backward()
@@ -639,7 +564,7 @@ class BOOM:
 				self.cfg.grad_clip_norm,
 			)
 			self.flow_optim.step()
-
+			
 		# Restore critic gradient tracking
 		self.model.track_q_grad(True)
 
@@ -703,7 +628,7 @@ class BOOM:
 		with torch.no_grad():
 			next_z = self.model.encode(obs[1:], task)
 			td_targets = self._td_target(next_z, reward, task)
-
+			
 		# Prepare for update
 		self.optim.zero_grad(set_to_none=True)
 		self.model.train()
@@ -749,7 +674,7 @@ class BOOM:
 			+ self.cfg.reward_coef * reward_loss
 			+ self.cfg.value_coef * value_loss
 		)
-
+			
 		# Update model
 		total_loss.backward()
 		grad_norm = torch.nn.utils.clip_grad_norm_(

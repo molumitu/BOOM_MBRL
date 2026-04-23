@@ -139,5 +139,3 @@ TASK_SET = {
         "mw-hand-insert",
     ],
 }
-
-from boom.common.debug import plot_mppi_debug, plot_trajs
