@@ -599,7 +599,7 @@ class BOOM:
 			z_flat = zs.reshape(H * B, -1).detach()
 
 			# Prepare data: use executed action
-			action_flat = action.reshape(H * B, -1).detach()
+			action_flat = mu.reshape(H * B, -1).detach()
 
 			# ========================================
 			# Part 1: Flow Matching Loss (监督项)
