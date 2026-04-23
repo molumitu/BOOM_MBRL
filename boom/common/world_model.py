@@ -179,7 +179,7 @@ class WorldModel(nn.Module):
         return action_t
     
     
-    def flow_policy(self, z, n_steps=10):
+    def flow_policy(self, z, action=None, n_steps=10):
         """
         One-step terminal mean flow policy.
 
@@ -197,7 +197,8 @@ class WorldModel(nn.Module):
         time_start = torch.zeros(B, 1, device=device)
         time_step = 1.0 / n_steps
         
-        action = torch.randn(B, self.cfg.action_dim, device=device, dtype=dtype)
+        if action is None:
+            action = torch.randn(B, self.cfg.action_dim, device=device, dtype=dtype)
 
         for i in range(n_steps):
             time_end = time_start + time_step
